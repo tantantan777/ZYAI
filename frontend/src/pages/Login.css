@@ -1,0 +1,299 @@
+.login-container {
+  min-height: 100vh;
+  display: flex;
+  background: #f0f2f5;
+}
+
+.login-left {
+  flex: 6;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 60px 40px;
+  color: white;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+  height: 100vh;
+}
+
+.login-left::before {
+  content: '';
+  position: absolute;
+  width: 300px;
+  height: 300px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  top: -100px;
+  right: -100px;
+}
+
+.login-left::after {
+  content: '';
+  position: absolute;
+  width: 200px;
+  height: 200px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  bottom: -50px;
+  left: -50px;
+}
+
+.brand-info {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  margin: auto 0;
+}
+
+.brand-info h1 {
+  font-size: 64px;
+  font-weight: 700;
+  margin-bottom: 24px;
+  text-align: center;
+  letter-spacing: 4px;
+}
+
+.brand-info p {
+  font-size: 20px;
+  opacity: 0.95;
+  text-align: center;
+  line-height: 1.8;
+  margin-bottom: 20px;
+}
+
+.brand-description {
+  font-size: 16px !important;
+  opacity: 0.85 !important;
+  line-height: 1.6 !important;
+  margin-bottom: 40px !important;
+  padding: 0 20px;
+}
+
+.brand-features {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+  margin-top: 60px;
+}
+
+@media (min-width: 1400px) {
+  .brand-features {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.feature-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.feature-icon {
+  font-size: 32px;
+  flex-shrink: 0;
+}
+
+.feature-text h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.feature-text p {
+  font-size: 14px;
+  opacity: 0.9;
+  margin: 0;
+  text-align: left;
+}
+
+.brand-stats {
+  display: flex;
+  justify-content: space-around;
+  margin-top: 50px;
+  padding-top: 40px;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.stat-item {
+  text-align: center;
+}
+
+.stat-number {
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: white;
+}
+
+.stat-label {
+  font-size: 14px;
+  opacity: 0.85;
+  color: white;
+}
+
+.login-right {
+  flex: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: white;
+}
+
+.login-box {
+  width: 100%;
+  max-width: 520px;
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.login-header h2 {
+  font-size: 28px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 16px;
+  white-space: nowrap;
+}
+
+.login-header p {
+  font-size: 14px;
+  color: #666;
+}
+
+.login-form {
+  margin-top: 24px;
+}
+
+.code-input-wrapper {
+  display: flex;
+  gap: 8px;
+}
+
+.code-input-wrapper input {
+  flex: 1;
+}
+
+.send-code-btn {
+  white-space: nowrap;
+  min-width: 110px;
+  height: 40px;
+}
+
+.link {
+  color: #1890ff;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.login-footer {
+  margin-top: 32px;
+  text-align: center;
+  font-size: 12px;
+  color: #999;
+}
+
+.login-footer p {
+  margin: 4px 0;
+}
+
+.footer-link {
+  color: #999;
+  text-decoration: none;
+}
+
+.footer-link:hover {
+  color: #666;
+  text-decoration: underline;
+}
+
+/* 自定义滚动条样式 */
+.login-left::-webkit-scrollbar {
+  width: 8px;
+}
+
+.login-left::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+
+.login-left::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+}
+
+.login-left::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
+}
+
+/* 服务条款和隐私政策样式 */
+.terms-container {
+  width: 100%;
+  padding: 20px;
+  color: white;
+  position: relative;
+  z-index: 1;
+}
+
+.terms-container .back-button {
+  color: white;
+  font-size: 16px;
+  padding: 0;
+  margin-bottom: 20px;
+}
+
+.terms-container .back-button:hover {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.terms-container h1 {
+  font-size: 32px;
+  font-weight: 600;
+  margin-bottom: 30px;
+  color: white;
+}
+
+.terms-content {
+  line-height: 1.8;
+}
+
+.terms-content h2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin-top: 30px;
+  margin-bottom: 15px;
+  color: white;
+}
+
+.terms-content p {
+  margin-bottom: 15px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.terms-content ul {
+  margin-left: 20px;
+  margin-bottom: 15px;
+}
+
+.terms-content li {
+  margin-bottom: 8px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.terms-content .update-time {
+  margin-top: 40px;
+  font-style: italic;
+  color: rgba(255, 255, 255, 0.6);
+}
