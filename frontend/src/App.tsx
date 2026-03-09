@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import ProjectList from './pages/ProjectList';
 import Permissions from './pages/Permissions';
 import Profile from './pages/Profile';
+import AIChat from './pages/AIChat';
 import Login from './pages/Login';
 import { authService } from './services/authService';
 import './App.css';
@@ -72,6 +73,7 @@ function ProtectedRoutes() {
       <Route path="/" element={<MainLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<Dashboard />} />
+        <Route path="ai-chat" element={<AIChat />} />
         <Route path="projects" element={<ProjectList />} />
         <Route path="permissions" element={<Permissions />} />
         <Route path="profile" element={<Profile />} />

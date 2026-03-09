@@ -68,6 +68,11 @@ export default function MainLayout() {
             icon: <HomeOutlined />,
           },
           {
+            path: '/ai-chat',
+            name: 'AI对话',
+            icon: <CommentOutlined />,
+          },
+          {
             path: '/projects',
             name: '项目管理',
             icon: <ProjectOutlined />,
