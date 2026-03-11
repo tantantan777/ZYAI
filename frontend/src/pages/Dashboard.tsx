@@ -1,9 +1,11 @@
 import { ProCard, StatisticCard } from '@ant-design/pro-components';
 import { ProjectOutlined, CheckCircleOutlined, SyncOutlined, ClockCircleOutlined } from '@ant-design/icons';
+import './Dashboard.css';
 
 export default function Dashboard() {
   return (
-    <div style={{ padding: 24 }}>
+    <div className="dashboard-page-root">
+      <div className="dashboard-page-body">
       <ProCard
         title="项目概览"
         style={{ marginBottom: 24 }}
@@ -39,6 +41,7 @@ export default function Dashboard() {
           />
         </StatisticCard.Group>
       </ProCard>
+      </div>
     </div>
   );
 }

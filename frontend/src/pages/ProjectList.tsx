@@ -1,6 +1,7 @@
 import { ProTable } from '@ant-design/pro-components';
 import { Tag } from 'antd';
 import type { ProColumns } from '@ant-design/pro-components';
+import './ProjectList.css';
 
 type ProjectItem = {
   id: string;
@@ -80,14 +81,18 @@ export default function ProjectList() {
   ];
 
   return (
-    <ProTable<ProjectItem>
-      columns={columns}
-      dataSource={mockData}
-      rowKey="id"
-      search={false}
-      dateFormatter="string"
-      headerTitle="项目列表"
-      toolBarRender={() => []}
-    />
+    <div className="project-list-page-root">
+      <div className="project-list-page-body">
+        <ProTable<ProjectItem>
+          columns={columns}
+          dataSource={mockData}
+          rowKey="id"
+          search={false}
+          dateFormatter="string"
+          headerTitle="项目列表"
+          toolBarRender={() => []}
+        />
+      </div>
+    </div>
   );
 }

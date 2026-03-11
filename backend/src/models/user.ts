@@ -24,4 +24,12 @@ export const createUsersTable = async () => {
   `;
 
   await pool.query(query);
+
+  // Backward-compatible migrations
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(100);`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar TEXT;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(50);`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(100);`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(20);`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hire_date DATE;`);
 };

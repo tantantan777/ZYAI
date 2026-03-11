@@ -27,3 +27,5 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
     return res.status(401).json({ message: '认证令牌无效或已过期' });
   }
 };
+
+export const authenticateToken = authMiddleware;

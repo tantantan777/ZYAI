@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"cd E:\\\\ZYAI\\\\backend && npm run build 2>&1 | head -20\",\"description\":\"编译后端TypeScript代码\"}",
+  "error": "Exit code 1\n/usr/bin/bash: line 1: cd: E:ZYAIbackend: No such file or directory",
+  "timestamp": "2026-03-10T08:35:33.454Z",
+  "retry_count": 1
+}

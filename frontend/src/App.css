@@ -8,3 +8,24 @@
   width: 100%;
   height: 100vh;
 }
+
+/* 确保 ProLayout 及其内容区域填满高度 */
+.ant-pro-layout {
+  height: 100vh !important;
+}
+
+.ant-pro-layout .ant-layout {
+  height: 100% !important;
+}
+
+.ant-pro-layout .ant-pro-layout-content {
+  height: 100% !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.ant-pro-layout .ant-pro-layout-content > div {
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+}

@@ -1,0 +1,80 @@
+.system-settings-page-root {
+  width: 100%;
+  height: 100%;
+  background: #fff;
+}
+
+.system-settings-card {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+
+.system-settings-card .ant-card-body {
+  height: 100%;
+  overflow: auto;
+}
+
+.system-settings-org-root {
+  width: 100%;
+  padding: 16px 16px 24px;
+}
+
+.system-settings-org-col {
+  min-width: 0;
+}
+
+.system-settings-org-card {
+  height: 100%;
+}
+
+.system-settings-org-card .ant-card-body {
+  padding: 12px;
+}
+
+.system-settings-org-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 560px;
+  overflow: auto;
+}
+
+.system-settings-org-list__item {
+  padding: 10px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  user-select: none;
+}
+
+.system-settings-org-list__item:hover {
+  border-color: #d9d9d9;
+}
+
+.system-settings-org-list__item.is-active {
+  border-color: #91caff;
+  background: #e6f4ff;
+}
+
+.system-settings-org-list__item.is-readonly {
+  cursor: default;
+}
+
+.system-settings-org-list__title {
+  color: #262626;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.system-settings-org-list__sub {
+  margin-top: 4px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.system-settings-user-table .ant-table-thead > tr > th {
+  text-align: center;
+}

@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"npm run build\",\"timeout\":30000,\"description\":\"编译后端代码\"}",
+  "error": "Exit code 2\n\n> backend@1.0.0 build\n> tsc\n\nsrc/test-ai-api.ts(1,19): error TS2307: Cannot find module 'axios' or its corresponding type declarations.",
+  "timestamp": "2026-03-10T09:12:00.264Z",
+  "retry_count": 1
+}

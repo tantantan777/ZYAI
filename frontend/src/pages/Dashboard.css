@@ -1,0 +1,12 @@
+.dashboard-page-root {
+  width: 100%;
+  height: 100%;
+  background: #fff;
+}
+
+.dashboard-page-body {
+  height: 100%;
+  overflow: auto;
+  padding: 16px 16px 24px;
+}
+

@@ -5,9 +5,9 @@ import { useEffect, useState } from 'react';
 import MainLayout from './layouts/MainLayout';
 import Dashboard from './pages/Dashboard';
 import ProjectList from './pages/ProjectList';
-import Permissions from './pages/Permissions';
 import Profile from './pages/Profile';
 import AIChat from './pages/AIChat';
+import SystemSettings from './pages/SystemSettings';
 import Login from './pages/Login';
 import { authService } from './services/authService';
 import './App.css';
@@ -75,7 +75,7 @@ function ProtectedRoutes() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="ai-chat" element={<AIChat />} />
         <Route path="projects" element={<ProjectList />} />
-        <Route path="permissions" element={<Permissions />} />
+        <Route path="system-settings" element={<SystemSettings />} />
         <Route path="profile" element={<Profile />} />
       </Route>
     </Routes>
