@@ -57,11 +57,11 @@ const defaultVisibilitySettings: VisibilitySettings = {
 };
 
 const permissionFieldOptions: Array<{ key: keyof VisibilitySettings; label: string }> = [
-  { key: 'dashboardVisible', label: '工作台可见性' },
-  { key: 'aiChatVisible', label: 'AI对话页面可见性' },
-  { key: 'projectsVisible', label: '项目管理页面可见性' },
-  { key: 'userQueryVisible', label: '用户查询页面可见性' },
-  { key: 'systemSettingsVisible', label: '系统配置菜单可见性' },
+  { key: 'dashboardVisible', label: '工作台权限' },
+  { key: 'aiChatVisible', label: 'AI对话页面权限' },
+  { key: 'projectsVisible', label: '项目管理页面权限' },
+  { key: 'userQueryVisible', label: '用户查询页面权限' },
+  { key: 'systemSettingsVisible', label: '系统配置页权限' },
 ];
 
 function normalizeVisibilitySettings(settings?: Partial<VisibilitySettings>): VisibilitySettings {
@@ -498,6 +498,7 @@ export default function SystemSettings() {
 
   const handleDelete = (target: RenameTarget) => {
     Modal.confirm({
+      centered: true,
       title: `删除${orgTypeLabelMap[target.type]}`,
       content:
         target.type === 'person'
@@ -919,6 +920,7 @@ export default function SystemSettings() {
             <Modal
               title={permissionTarget ? `${orgTypeLabelMap[permissionTarget.type]}权限` : '权限'}
               open={Boolean(permissionTarget)}
+              centered
               okText="保存"
               cancelText="取消"
               onOk={() => void handleSavePermission()}
@@ -940,7 +942,7 @@ export default function SystemSettings() {
                   </Form.Item>
                 ))}
                 <div style={{ color: 'rgba(0, 0, 0, 0.45)', fontSize: 12 }}>
-                  关闭后，此{permissionTarget ? orgTypeLabelMap[permissionTarget.type] : '对象'}将无法看到对应页面或菜单。
+                  关闭后，此{permissionTarget ? orgTypeLabelMap[permissionTarget.type] : '对象'}仍可看到页面或菜单，但点击后会提示无权限。
                 </div>
               </Form>
             </Modal>
@@ -1179,6 +1181,7 @@ export default function SystemSettings() {
             <Modal
               title="新增单位"
               open={addUnitModalOpen}
+              centered
               okText="保存"
               cancelText="取消"
               onOk={handleAddUnit}
@@ -1201,6 +1204,7 @@ export default function SystemSettings() {
             <Modal
               title="新增部门"
               open={addDepartmentModalOpen}
+              centered
               okText="保存"
               cancelText="取消"
               onOk={handleAddDepartment}
@@ -1223,6 +1227,7 @@ export default function SystemSettings() {
             <Modal
               title="新增职位"
               open={addPositionModalOpen}
+              centered
               okText="保存"
               cancelText="取消"
               onOk={handleAddPosition}
@@ -1245,6 +1250,7 @@ export default function SystemSettings() {
             <Modal
               title={renameTarget ? `重命名${orgTypeLabelMap[renameTarget.type]}` : '重命名'}
               open={Boolean(renameTarget)}
+              centered
               okText="保存"
               cancelText="取消"
               onOk={() => void handleRename()}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { ProLayout } from '@ant-design/pro-components';
 import {
@@ -10,7 +10,7 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Avatar, Button, Modal, Popover, Tooltip } from 'antd';
+import { Avatar, Button, Modal, Popover, Tooltip, notification } from 'antd';
 import { disconnectRealtime, ensureRealtimeConnection, type UserProfileUpdatedEvent } from '../services/realtime';
 import api from '../utils/api';
 
@@ -31,6 +31,56 @@ type LayoutUser = {
   userQueryVisible?: boolean;
   systemSettingsVisible?: boolean;
 };
+
+type FeatureKey = 'dashboard' | 'ai-chat' | 'projects' | 'user-query' | 'system-settings';
+
+type FeatureConfig = {
+  path: string;
+  name: string;
+  noticeName: string;
+  icon: ReactNode;
+  hasAccess: (user: LayoutUser | null) => boolean;
+};
+
+const featureConfigs: Record<FeatureKey, FeatureConfig> = {
+  dashboard: {
+    path: '/dashboard',
+    name: '工作台',
+    noticeName: '工作台',
+    icon: <HomeOutlined />,
+    hasAccess: (user) => user?.dashboardVisible !== false,
+  },
+  'ai-chat': {
+    path: '/ai-chat',
+    name: 'AI对话',
+    noticeName: 'AI对话页面',
+    icon: <CommentOutlined />,
+    hasAccess: (user) => user?.aiChatVisible !== false,
+  },
+  projects: {
+    path: '/projects',
+    name: '项目管理',
+    noticeName: '项目管理页面',
+    icon: <ProjectOutlined />,
+    hasAccess: (user) => user?.projectsVisible !== false,
+  },
+  'user-query': {
+    path: '/user-query',
+    name: '用户查询',
+    noticeName: '用户查询页面',
+    icon: <TeamOutlined />,
+    hasAccess: (user) => user?.userQueryVisible !== false,
+  },
+  'system-settings': {
+    path: '/system-settings',
+    name: '系统配置',
+    noticeName: '系统配置页',
+    icon: <SettingOutlined />,
+    hasAccess: (user) => user?.systemSettingsVisible !== false,
+  },
+};
+
+const featureOrder: FeatureKey[] = ['dashboard', 'ai-chat', 'projects', 'user-query', 'system-settings'];
 
 function readStoredUser(): LayoutUser | null {
   const userStr = localStorage.getItem('user') || sessionStorage.getItem('user');
@@ -92,34 +142,41 @@ function formatDate(value?: string) {
   return `${year}-${month}-${day}`;
 }
 
+function getBlockedFeature(pathname: string, user: LayoutUser | null): FeatureConfig | null {
+  for (const featureKey of featureOrder) {
+    const feature = featureConfigs[featureKey];
+    if (pathname.startsWith(feature.path) && !feature.hasAccess(user)) {
+      return feature;
+    }
+  }
+
+  return null;
+}
+
 export default function MainLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState<LayoutUser | null>(() => readStoredUser());
-
-  const canAccessDashboard = user?.dashboardVisible !== false;
-  const canAccessAIChat = user?.aiChatVisible !== false;
-  const canAccessProjects = user?.projectsVisible !== false;
-  const canAccessUserQuery = user?.userQueryVisible !== false;
-  const canAccessSystemSettings = user?.systemSettingsVisible !== false;
+  const [profileLoaded, setProfileLoaded] = useState(false);
+  const lastDeniedPathRef = useRef<string | null>(null);
 
   const getFallbackPath = () => {
-    if (canAccessDashboard) {
-      return '/dashboard';
+    for (const featureKey of featureOrder) {
+      const feature = featureConfigs[featureKey];
+      if (feature.hasAccess(user)) {
+        return feature.path;
+      }
     }
-    if (canAccessAIChat) {
-      return '/ai-chat';
-    }
-    if (canAccessProjects) {
-      return '/projects';
-    }
-    if (canAccessUserQuery) {
-      return '/user-query';
-    }
-    if (canAccessSystemSettings) {
-      return '/system-settings';
-    }
+
     return '/profile';
+  };
+
+  const showPermissionDenied = (featureName: string) => {
+    notification.warning({
+      message: '无权限',
+      description: `你没有打开${featureName}的权限，请联系管理员。`,
+      placement: 'topRight',
+    });
   };
 
   useEffect(() => {
@@ -135,6 +192,8 @@ export default function MainLayout() {
         writeStoredUser(nextUser);
       } catch (error) {
         console.error('加载顶部用户信息失败:', error);
+      } finally {
+        setProfileLoaded(true);
       }
     };
 
@@ -158,26 +217,25 @@ export default function MainLayout() {
     };
   }, []);
 
-  useEffect(() => {
-    const blocked =
-      (location.pathname.startsWith('/dashboard') && !canAccessDashboard) ||
-      (location.pathname.startsWith('/ai-chat') && !canAccessAIChat) ||
-      (location.pathname.startsWith('/projects') && !canAccessProjects) ||
-      (location.pathname.startsWith('/user-query') && !canAccessUserQuery) ||
-      (location.pathname.startsWith('/system-settings') && !canAccessSystemSettings);
+  const blockedFeature = profileLoaded ? getBlockedFeature(location.pathname, user) : null;
 
-    if (blocked) {
-      navigate(getFallbackPath(), { replace: true });
+  useEffect(() => {
+    if (!profileLoaded) {
+      return;
     }
-  }, [
-    canAccessAIChat,
-    canAccessDashboard,
-    canAccessProjects,
-    canAccessSystemSettings,
-    canAccessUserQuery,
-    location.pathname,
-    navigate,
-  ]);
+
+    if (!blockedFeature) {
+      lastDeniedPathRef.current = null;
+      return;
+    }
+
+    if (lastDeniedPathRef.current !== location.pathname) {
+      showPermissionDenied(blockedFeature.noticeName);
+      lastDeniedPathRef.current = location.pathname;
+    }
+
+    navigate(getFallbackPath(), { replace: true });
+  }, [blockedFeature, location.pathname, navigate, profileLoaded, user]);
 
   const profileContent = useMemo(
     () => (
@@ -225,13 +283,14 @@ export default function MainLayout() {
     });
   };
 
-  const menuRoutes = [
-    ...(canAccessDashboard ? [{ path: '/dashboard', name: '工作台', icon: <HomeOutlined /> }] : []),
-    ...(canAccessAIChat ? [{ path: '/ai-chat', name: 'AI对话', icon: <CommentOutlined /> }] : []),
-    ...(canAccessProjects ? [{ path: '/projects', name: '项目管理', icon: <ProjectOutlined /> }] : []),
-    ...(canAccessUserQuery ? [{ path: '/user-query', name: '用户查询', icon: <TeamOutlined /> }] : []),
-    ...(canAccessSystemSettings ? [{ path: '/system-settings', name: '系统配置', icon: <SettingOutlined /> }] : []),
-  ];
+  const menuRoutes = featureOrder.map((featureKey) => {
+    const feature = featureConfigs[featureKey];
+    return {
+      path: feature.path,
+      name: feature.name,
+      icon: feature.icon,
+    };
+  });
 
   return (
     <ProLayout
@@ -244,7 +303,31 @@ export default function MainLayout() {
         routes: menuRoutes,
       }}
       menuDataRender={() => menuRoutes as any}
-      menuItemRender={(item, dom) => <div onClick={() => navigate(item.path || '/')}>{dom}</div>}
+      menuItemRender={(item, dom) => {
+        const feature = featureOrder
+          .map((featureKey) => featureConfigs[featureKey])
+          .find((config) => config.path === item.path);
+
+        return (
+          <div
+            onClick={() => {
+              if (!feature) {
+                navigate(item.path || '/');
+                return;
+              }
+
+              if (!feature.hasAccess(user)) {
+                showPermissionDenied(feature.noticeName);
+                return;
+              }
+
+              navigate(feature.path);
+            }}
+          >
+            {dom}
+          </div>
+        );
+      }}
       menuFooterRender={(props) => {
         const collapsed = Boolean((props as { collapsed?: boolean } | undefined)?.collapsed);
 
@@ -299,7 +382,7 @@ export default function MainLayout() {
         ),
       }}
     >
-      <Outlet />
+      {profileLoaded && !blockedFeature ? <Outlet /> : null}
     </ProLayout>
   );
 }

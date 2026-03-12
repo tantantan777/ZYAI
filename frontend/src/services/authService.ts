@@ -4,10 +4,32 @@ export interface SendCodeRequest {
   email: string;
 }
 
+export interface RegistrationOrgUnit {
+  id: number;
+  name: string;
+}
+
+export interface RegistrationOrgDepartment {
+  id: number;
+  unitId: number;
+  name: string;
+}
+
+export interface RegistrationOrgPosition {
+  id: number;
+  departmentId: number;
+  name: string;
+}
+
 export interface LoginRequest {
   email: string;
   code: string;
   remember?: boolean;
+  name?: string;
+  gender?: 'male' | 'female';
+  phone?: string;
+  hireDate?: string;
+  positionId?: number;
 }
 
 export interface LoginResponse {
@@ -40,21 +62,30 @@ export interface VerifyResponse {
 }
 
 export const authService = {
-  // 发送验证码
   sendCode: async (email: string) => {
-    const response = await api.post<{ message: string; cooldownTime: number }>('/auth/send-code', { email });
+    const response = await api.post<{ message: string; cooldownTime: number; isExistingUser: boolean }>(
+      '/auth/send-code',
+      { email },
+    );
     return response.data;
   },
 
-  // 登录/注册
   login: async (data: LoginRequest) => {
     const response = await api.post<LoginResponse>('/auth/login', data);
     return response.data;
   },
 
-  // 验证token
   verify: async () => {
     const response = await api.get<VerifyResponse>('/auth/verify');
+    return response.data;
+  },
+
+  getRegistrationOrgStructure: async () => {
+    const response = await api.get<{
+      units: RegistrationOrgUnit[];
+      departments: RegistrationOrgDepartment[];
+      positions: RegistrationOrgPosition[];
+    }>('/auth/registration-org-structure');
     return response.data;
   },
 };

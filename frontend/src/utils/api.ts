@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { notification } from 'antd';
 import { disconnectRealtime } from '../services/realtime';
 import { getApiBaseUrl } from './backendUrl';
 
@@ -10,26 +11,19 @@ const api = axios.create({
   },
 });
 
-// 请求拦截器
 api.interceptors.request.use(
   (config) => {
-    // 先从 localStorage 读取，如果没有再从 sessionStorage 读取
     const token = localStorage.getItem('token') || sessionStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error),
 );
 
-// 响应拦截器
 api.interceptors.response.use(
-  (response) => {
-    return response;
-  },
+  (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       disconnectRealtime();
@@ -41,8 +35,17 @@ api.interceptors.response.use(
       sessionStorage.removeItem('remember');
       window.location.href = '/login';
     }
+
+    if (error.response?.status === 403) {
+      notification.warning({
+        message: '无权限',
+        description: error.response?.data?.message || '你没有访问当前功能的权限，请联系管理员。',
+        placement: 'topRight',
+      });
+    }
+
     return Promise.reject(error);
-  }
+  },
 );
 
 export default api;

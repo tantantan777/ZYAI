@@ -54,9 +54,9 @@ export const authMiddleware = (req: AuthRequest, res: Response, next: NextFuncti
 
 export const authenticateToken = authMiddleware;
 
-function createVisibilityGuard(
+function createPermissionGuard(
   getVisibility: (userId: number) => Promise<boolean>,
-  forbiddenMessage: string,
+  featureName: string,
   errorMessage: string,
 ) {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -65,9 +65,9 @@ function createVisibilityGuard(
         return res.status(401).json({ message: '未提供认证信息' });
       }
 
-      const visible = await getVisibility(req.userId);
-      if (!visible) {
-        return res.status(403).json({ message: forbiddenMessage });
+      const hasPermission = await getVisibility(req.userId);
+      if (!hasPermission) {
+        return res.status(403).json({ message: `你没有打开${featureName}的权限，请联系管理员。` });
       }
 
       next();
@@ -78,20 +78,20 @@ function createVisibilityGuard(
   };
 }
 
-export const requireSystemSettingsAccess = createVisibilityGuard(
+export const requireSystemSettingsAccess = createPermissionGuard(
   getSystemSettingsVisibility,
-  '当前账号无权访问系统配置',
+  '系统配置页',
   '校验系统配置权限失败',
 );
 
-export const requireAIChatAccess = createVisibilityGuard(
+export const requireAIChatAccess = createPermissionGuard(
   getAIChatVisibility,
-  '当前账号无权访问AI对话',
+  'AI对话页面',
   '校验AI对话权限失败',
 );
 
-export const requireUserQueryAccess = createVisibilityGuard(
+export const requireUserQueryAccess = createPermissionGuard(
   getUserQueryVisibility,
-  '当前账号无权访问用户查询',
+  '用户查询页面',
   '校验用户查询权限失败',
 );
