@@ -1,7 +1,9 @@
 import axios from 'axios';
+import { disconnectRealtime } from '../services/realtime';
+import { getApiBaseUrl } from './backendUrl';
 
 const api = axios.create({
-  baseURL: 'http://localhost:3000/api',
+  baseURL: getApiBaseUrl(),
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -30,6 +32,7 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
+      disconnectRealtime();
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       localStorage.removeItem('remember');

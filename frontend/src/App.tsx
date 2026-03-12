@@ -8,8 +8,10 @@ import ProjectList from './pages/ProjectList';
 import Profile from './pages/Profile';
 import AIChat from './pages/AIChat';
 import SystemSettings from './pages/SystemSettings';
+import UserDirectory from './pages/UserDirectory';
 import Login from './pages/Login';
 import { authService } from './services/authService';
+import { disconnectRealtime, emitPresenceActivity, ensureRealtimeConnection } from './services/realtime';
 import './App.css';
 
 function ProtectedRoutes() {
@@ -60,6 +62,52 @@ function ProtectedRoutes() {
     checkAuth();
   }, []); // 只在组件首次挂载时执行
 
+  useEffect(() => {
+    if (!isAuthenticated) {
+      disconnectRealtime();
+      return;
+    }
+
+    const socket = ensureRealtimeConnection();
+    if (!socket) {
+      return;
+    }
+
+    let lastActivityAt = 0;
+
+    const reportActivity = () => {
+      const now = Date.now();
+      if (now - lastActivityAt < 30_000) {
+        return;
+      }
+
+      lastActivityAt = now;
+      emitPresenceActivity();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        reportActivity();
+      }
+    };
+
+    socket.on('connect', reportActivity);
+    window.addEventListener('focus', reportActivity);
+    window.addEventListener('pointerdown', reportActivity);
+    window.addEventListener('keydown', reportActivity);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    reportActivity();
+
+    return () => {
+      socket.off('connect', reportActivity);
+      window.removeEventListener('focus', reportActivity);
+      window.removeEventListener('pointerdown', reportActivity);
+      window.removeEventListener('keydown', reportActivity);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      disconnectRealtime();
+    };
+  }, [isAuthenticated]);
+
   if (isChecking) {
     return <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>加载中...</div>;
   }
@@ -75,6 +123,7 @@ function ProtectedRoutes() {
         <Route path="dashboard" element={<Dashboard />} />
         <Route path="ai-chat" element={<AIChat />} />
         <Route path="projects" element={<ProjectList />} />
+        <Route path="user-query" element={<UserDirectory />} />
         <Route path="system-settings" element={<SystemSettings />} />
         <Route path="profile" element={<Profile />} />
       </Route>

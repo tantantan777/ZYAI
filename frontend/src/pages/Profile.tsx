@@ -17,6 +17,11 @@ import type { UploadFile } from 'antd';
 import { ReloadOutlined, SaveOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import api from '../utils/api';
+import {
+  ensureRealtimeConnection,
+  type OrgStructureUpdatedEvent,
+  type UserProfileUpdatedEvent,
+} from '../services/realtime';
 import './Profile.css';
 
 interface OrgUnitItem {
@@ -126,9 +131,64 @@ export default function Profile() {
   );
   const tenureText = useMemo(() => formatTenure(hireDateValue), [hireDateValue]);
 
+  const applyOrgStructure = (orgData: {
+    units?: OrgUnitItem[];
+    departments?: OrgDepartmentItem[];
+    positions?: OrgPositionItem[];
+  }) => {
+    setUnits((orgData.units ?? []) as OrgUnitItem[]);
+    setDepartments((orgData.departments ?? []) as OrgDepartmentItem[]);
+    setPositions((orgData.positions ?? []) as OrgPositionItem[]);
+  };
+
+  const loadOrgStructure = async (silent = false) => {
+    try {
+      const response = await api.get('/org/structure');
+      applyOrgStructure(response.data);
+    } catch (error) {
+      console.error('加载组织结构失败:', error);
+      if (!silent) {
+        message.error('加载组织结构失败');
+      }
+    }
+  };
+
   useEffect(() => {
     void loadAll();
   }, []);
+
+  useEffect(() => {
+    const socket = ensureRealtimeConnection();
+    if (!socket) {
+      return;
+    }
+
+    const handleProfileUpdated = (_payload: UserProfileUpdatedEvent) => {
+      window.dispatchEvent(new Event('user-profile-updated'));
+      void loadAll();
+    };
+    const handleOrgStructureUpdated = (_payload: OrgStructureUpdatedEvent) => {
+      void loadOrgStructure(true);
+    };
+
+    socket.on('user:profile-updated', handleProfileUpdated);
+    socket.on('org:structure-updated', handleOrgStructureUpdated);
+
+    return () => {
+      socket.off('user:profile-updated', handleProfileUpdated);
+      socket.off('org:structure-updated', handleOrgStructureUpdated);
+    };
+  }, []);
+
+  useEffect(() => {
+    const isValid = selectedUnitId === 0 || units.some((item) => item.id === selectedUnitId);
+    if (isValid) {
+      return;
+    }
+    setSelectedUnitId(0);
+    setSelectedDepartmentId(0);
+    setSelectedPositionId(0);
+  }, [selectedUnitId, units]);
 
   useEffect(() => {
     const isValid = currentDepartments.some((item) => item.id === selectedDepartmentId);
@@ -167,13 +227,7 @@ export default function Profile() {
       ]);
 
       const user = profileRes.data.user as ProfileUser;
-      const nextUnits = (orgRes.data.units ?? []) as OrgUnitItem[];
-      const nextDepartments = (orgRes.data.departments ?? []) as OrgDepartmentItem[];
-      const nextPositions = (orgRes.data.positions ?? []) as OrgPositionItem[];
-
-      setUnits(nextUnits);
-      setDepartments(nextDepartments);
-      setPositions(nextPositions);
+      applyOrgStructure(orgRes.data);
 
       const nextSelectedUnitId = user.unitId ?? 0;
       const nextSelectedDepartmentId = user.departmentId ?? 0;
@@ -218,6 +272,7 @@ export default function Profile() {
       });
 
       message.success('保存成功');
+      window.dispatchEvent(new Event('user-profile-updated'));
       void loadAll();
     } catch (error: any) {
       if (error?.errorFields) {

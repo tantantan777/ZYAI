@@ -1,55 +1,54 @@
 import { Request, Response } from 'express';
 import pool from '../config/database';
+import { presenceService } from '../services/presenceService';
+import { emitUserDirectoryUpdated, emitUserProfileUpdated } from '../services/socketServer';
+import { getFeatureAccessInfo } from '../services/systemSettingsAccess';
 
-function normalizeOptionalString(value: any): string | null {
-  if (value === undefined || value === null) {
+function normalizeOptionalString(value: unknown): string | null {
+  if (value === undefined || value === null || typeof value !== 'string') {
     return null;
   }
-  if (typeof value !== 'string') {
-    return null;
-  }
+
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
 }
 
-function toISODate(value: any): string | null {
+function toISODate(value: unknown): string | null {
   if (value === undefined || value === null || value === '') {
     return null;
   }
 
   if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) {
-      return null;
-    }
-    return value.toISOString().slice(0, 10);
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
   }
 
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return null;
-    }
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed) && !Number.isNaN(new Date(trimmed).getTime())) {
-      return trimmed;
-    }
-    const parsed = new Date(trimmed);
-    if (Number.isNaN(parsed.getTime())) {
-      return null;
-    }
-    return parsed.toISOString().slice(0, 10);
+  if (typeof value !== 'string') {
+    return null;
   }
 
-  return null;
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed) && !Number.isNaN(new Date(trimmed).getTime())) {
+    return trimmed;
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
 }
 
-function parseOptionalInt(value: any): number | null {
+function parseOptionalInt(value: unknown): number | null {
   if (value === undefined || value === null || value === '') {
     return null;
   }
+
   const parsed = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(parsed)) {
     return null;
   }
+
   const asInt = Math.trunc(parsed);
   return asInt > 0 ? asInt : null;
 }
@@ -57,6 +56,7 @@ function parseOptionalInt(value: any): number | null {
 export const getProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId as number;
+    const accessInfo = await getFeatureAccessInfo(userId);
 
     const result = await pool.query(
       `SELECT
@@ -82,7 +82,7 @@ export const getProfile = async (req: Request, res: Response) => {
       LEFT JOIN org_departments d ON d.id = p.department_id
       LEFT JOIN org_units un ON un.id = d.unit_id
       WHERE u.id = $1`,
-      [userId]
+      [userId],
     );
 
     if (result.rows.length === 0) {
@@ -102,6 +102,11 @@ export const getProfile = async (req: Request, res: Response) => {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         lastLogin: row.last_login,
+        dashboardVisible: accessInfo?.dashboardVisible ?? false,
+        aiChatVisible: accessInfo?.aiChatVisible ?? false,
+        projectsVisible: accessInfo?.projectsVisible ?? false,
+        userQueryVisible: accessInfo?.userQueryVisible ?? false,
+        systemSettingsVisible: accessInfo?.systemSettingsVisible ?? false,
         unitId: row.unit_id ?? null,
         unitName: row.unit_name ?? null,
         departmentId: row.department_id ?? null,
@@ -119,7 +124,6 @@ export const getProfile = async (req: Request, res: Response) => {
 export const updateProfile = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).userId as number;
-
     const name = normalizeOptionalString(req.body?.name);
     const genderRaw = req.body?.gender;
     const hireDateRaw = req.body?.hireDate;
@@ -146,7 +150,7 @@ export const updateProfile = async (req: Request, res: Response) => {
     ) {
       hireDate = hireDateRaw;
     } else {
-      return res.status(400).json({ message: '入职时间格式错误' });
+      return res.status(400).json({ message: '入职日期格式错误' });
     }
 
     if (avatar && avatar.length > 1024 * 1024) {
@@ -163,7 +167,7 @@ export const updateProfile = async (req: Request, res: Response) => {
          avatar = $5,
          updated_at = CURRENT_TIMESTAMP
        WHERE id = $6`,
-      [name, gender, hireDate, phone, avatar, userId]
+      [name, gender, hireDate, phone, avatar, userId],
     );
 
     if (positionId !== undefined) {
@@ -172,9 +176,12 @@ export const updateProfile = async (req: Request, res: Response) => {
          VALUES ($1, $2)
          ON CONFLICT (user_id)
          DO UPDATE SET position_id = EXCLUDED.position_id, updated_at = CURRENT_TIMESTAMP`,
-        [userId, positionId]
+        [userId, positionId],
       );
     }
+
+    emitUserProfileUpdated(userId);
+    emitUserDirectoryUpdated(userId);
 
     res.json({ message: '保存成功' });
   } catch (error) {
@@ -185,6 +192,7 @@ export const updateProfile = async (req: Request, res: Response) => {
 
 export const listUsers = async (_req: Request, res: Response) => {
   try {
+    const onlineUserIds = await presenceService.getOnlineUserIds();
     const result = await pool.query(
       `SELECT
         u.id,
@@ -194,10 +202,6 @@ export const listUsers = async (_req: Request, res: Response) => {
         u.phone,
         u.created_at::text as created_at,
         u.last_login::text as last_login,
-        CASE
-          WHEN u.last_login IS NOT NULL AND u.last_login > LOCALTIMESTAMP - INTERVAL '15 minutes' THEN TRUE
-          ELSE FALSE
-        END as is_online,
         uop.position_id,
         p.name as position_name,
         d.name as department_name,
@@ -207,7 +211,7 @@ export const listUsers = async (_req: Request, res: Response) => {
       LEFT JOIN org_positions p ON p.id = uop.position_id
       LEFT JOIN org_departments d ON d.id = p.department_id
       LEFT JOIN org_units un ON un.id = d.unit_id
-      ORDER BY u.created_at DESC, u.id DESC`
+      ORDER BY u.created_at DESC, u.id DESC`,
     );
 
     res.json({
@@ -219,7 +223,7 @@ export const listUsers = async (_req: Request, res: Response) => {
         phone: row.phone ?? null,
         createdAt: row.created_at,
         lastLogin: row.last_login ?? null,
-        isOnline: Boolean(row.is_online),
+        isOnline: onlineUserIds.has(row.id),
         unitName: row.unit_name ?? null,
         departmentName: row.department_name ?? null,
         positionId: row.position_id ?? null,

@@ -32,4 +32,20 @@ export const createUsersTable = async () => {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR(100);`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS gender VARCHAR(20);`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hire_date DATE;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP;`);
+
+  const visibilityColumns = [
+    'dashboard_visible',
+    'ai_chat_visible',
+    'projects_visible',
+    'user_query_visible',
+    'system_settings_visible',
+  ];
+
+  for (const column of visibilityColumns) {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${column} BOOLEAN NOT NULL DEFAULT TRUE;`);
+    await pool.query(`ALTER TABLE users ALTER COLUMN ${column} SET DEFAULT TRUE;`);
+    await pool.query(`UPDATE users SET ${column} = TRUE WHERE ${column} IS NULL;`);
+  }
 };

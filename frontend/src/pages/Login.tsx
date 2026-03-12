@@ -190,7 +190,20 @@ export default function Login() {
         placement: 'topRight',
       });
 
-      navigate('/dashboard');
+      const targetPath =
+        response.user.dashboardVisible !== false
+          ? '/dashboard'
+          : response.user.aiChatVisible !== false
+            ? '/ai-chat'
+            : response.user.projectsVisible !== false
+              ? '/projects'
+              : response.user.userQueryVisible !== false
+                ? '/user-query'
+                : response.user.systemSettingsVisible !== false
+                  ? '/system-settings'
+                  : '/profile';
+
+      navigate(targetPath);
     } catch (error: any) {
       notification.error({
         message: '登录失败',

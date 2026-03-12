@@ -1,10 +1,10 @@
 import express from 'express';
 import { getAIConfig, saveAIConfig } from '../controllers/aiConfigController';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireSystemSettingsAccess } from '../middleware/auth';
 
 const router = express.Router();
 
-router.get('/', authenticateToken, getAIConfig);
-router.post('/', authenticateToken, saveAIConfig);
+router.get('/', authenticateToken, requireSystemSettingsAccess, getAIConfig);
+router.post('/', authenticateToken, requireSystemSettingsAccess, saveAIConfig);
 
 export default router;

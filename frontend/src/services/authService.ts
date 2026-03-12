@@ -16,6 +16,11 @@ export interface LoginResponse {
   user: {
     id: number;
     email: string;
+    dashboardVisible?: boolean;
+    aiChatVisible?: boolean;
+    projectsVisible?: boolean;
+    userQueryVisible?: boolean;
+    systemSettingsVisible?: boolean;
   };
 }
 
@@ -26,6 +31,11 @@ export interface VerifyResponse {
     email: string;
     created_at: string;
     last_login: string;
+    dashboardVisible?: boolean;
+    aiChatVisible?: boolean;
+    projectsVisible?: boolean;
+    userQueryVisible?: boolean;
+    systemSettingsVisible?: boolean;
   };
 }
 

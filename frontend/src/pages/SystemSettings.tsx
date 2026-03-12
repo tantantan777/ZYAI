@@ -1,11 +1,18 @@
-import { useState, useEffect } from 'react';
-import { Card, Tabs, Form, Input, Select, Button, message, Space, InputNumber, Row, Col, Empty, Modal, Tooltip, Table, Tag } from 'antd';
-import type { TableProps } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import { Card, Tabs, Form, Input, Select, Button, message, Space, InputNumber, Row, Col, Empty, Modal, Tooltip, Dropdown, Switch } from 'antd';
+import type { MenuProps } from 'antd';
 import { SaveOutlined, PlusOutlined } from '@ant-design/icons';
 import api from '../utils/api';
+import {
+  ensureRealtimeConnection,
+  type OrgStructureUpdatedEvent,
+  type UserDirectoryUpdatedEvent,
+} from '../services/realtime';
 import './SystemSettings.css';
 
 const { TabPane } = Tabs;
+const UNASSIGNED_UNIT_ID = -1;
+const UNASSIGNED_UNIT_NAME = '未配置';
 
 interface AIConfigForm {
   provider: string;
@@ -33,70 +40,84 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
 };
 
-interface OrgUnitItem {
+interface VisibilitySettings {
+  dashboardVisible: boolean;
+  aiChatVisible: boolean;
+  projectsVisible: boolean;
+  userQueryVisible: boolean;
+  systemSettingsVisible: boolean;
+}
+
+const defaultVisibilitySettings: VisibilitySettings = {
+  dashboardVisible: true,
+  aiChatVisible: true,
+  projectsVisible: true,
+  userQueryVisible: true,
+  systemSettingsVisible: true,
+};
+
+const permissionFieldOptions: Array<{ key: keyof VisibilitySettings; label: string }> = [
+  { key: 'dashboardVisible', label: '工作台可见性' },
+  { key: 'aiChatVisible', label: 'AI对话页面可见性' },
+  { key: 'projectsVisible', label: '项目管理页面可见性' },
+  { key: 'userQueryVisible', label: '用户查询页面可见性' },
+  { key: 'systemSettingsVisible', label: '系统配置菜单可见性' },
+];
+
+function normalizeVisibilitySettings(settings?: Partial<VisibilitySettings>): VisibilitySettings {
+  return {
+    dashboardVisible: settings?.dashboardVisible !== false,
+    aiChatVisible: settings?.aiChatVisible !== false,
+    projectsVisible: settings?.projectsVisible !== false,
+    userQueryVisible: settings?.userQueryVisible !== false,
+    systemSettingsVisible: settings?.systemSettingsVisible !== false,
+  };
+}
+
+interface OrgUnitItem extends VisibilitySettings {
   id: number;
   name: string;
 }
 
-interface OrgDepartmentItem {
+interface OrgDepartmentItem extends VisibilitySettings {
   id: number;
   unitId: number;
   name: string;
 }
 
-interface OrgPositionItem {
+interface OrgPositionItem extends VisibilitySettings {
   id: number;
   departmentId: number;
   name: string;
 }
 
-interface OrgPersonItem {
+interface OrgPersonItem extends VisibilitySettings {
   id: number;
-  positionId: number;
+  positionId: number | null;
   name: string;
   email?: string;
   phone?: string;
 }
 
-interface RegisteredUserItem {
+type OrgContextType = 'unit' | 'department' | 'position' | 'person';
+
+type RenameTarget = {
+  type: OrgContextType;
   id: number;
-  email: string;
-  name: string | null;
-  gender: 'male' | 'female' | 'unknown' | null;
-  phone: string | null;
-  unitName: string | null;
-  departmentName: string | null;
-  positionName: string | null;
-  createdAt: string;
-  lastLogin: string | null;
-  isOnline: boolean;
-}
-
-function formatToDayStart(value: string | null | undefined): string {
-  if (!value) {
-    return '-';
-  }
-
-  const match = value.match(/\d{4}-\d{2}-\d{2}/);
-  if (!match) {
-    return '-';
-  }
-
-  return `${match[0]} 00:00:00`;
-}
+  name: string;
+  positionId?: number | null;
+} & Partial<VisibilitySettings>;
 
 export default function SystemSettings() {
   const [form] = Form.useForm<AIConfigForm>();
   const [saveLoading, setSaveLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string>('openai');
+  const [activeTabKey, setActiveTabKey] = useState('ai');
 
   const [units, setUnits] = useState<OrgUnitItem[]>([]);
   const [departments, setDepartments] = useState<OrgDepartmentItem[]>([]);
   const [positions, setPositions] = useState<OrgPositionItem[]>([]);
   const [people, setPeople] = useState<OrgPersonItem[]>([]);
-
-  const [registeredUsers, setRegisteredUsers] = useState<RegisteredUserItem[]>([]);
-  const [registeredUsersLoading, setRegisteredUsersLoading] = useState(false);
 
   const [selectedUnitId, setSelectedUnitId] = useState<number>(0);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<number>(0);
@@ -108,6 +129,64 @@ export default function SystemSettings() {
   const [addUnitName, setAddUnitName] = useState('');
   const [addDepartmentName, setAddDepartmentName] = useState('');
   const [addPositionName, setAddPositionName] = useState('');
+  const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameSubmitting, setRenameSubmitting] = useState(false);
+  const [permissionTarget, setPermissionTarget] = useState<RenameTarget | null>(null);
+  const [permissionValues, setPermissionValues] = useState<VisibilitySettings>(defaultVisibilitySettings);
+  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
+
+  const getContextMenuWithPermissionProps = (
+    target: RenameTarget,
+  ): { menu: MenuProps; trigger: ['contextMenu'] } => ({
+    trigger: ['contextMenu'],
+    menu: {
+      items: [
+        { key: 'rename', label: '\u91cd\u547d\u540d' },
+        { key: 'permission', label: '\u6743\u9650' },
+        { key: 'delete', label: '\u5220\u9664', danger: true },
+      ],
+      onClick: ({ key }) => {
+        if (key === 'rename') {
+          openRenameModal(target);
+          return;
+        }
+
+        if (key === 'permission') {
+          openPermissionModal(target);
+          return;
+        }
+
+        if (key === 'delete') {
+          handleDelete(target);
+        }
+      },
+    },
+  });
+
+  const getPersonContextMenuWithPermissionProps = (
+    target: RenameTarget,
+  ): { menu: MenuProps; trigger: ['contextMenu'] } => ({
+    trigger: ['contextMenu'],
+    menu: {
+      items: [
+        { key: 'permission', label: '\u6743\u9650' },
+        ...(target.positionId
+          ? [{ key: 'delete', label: '\u5220\u9664', danger: true }]
+          : []),
+      ],
+      onClick: ({ key }) => {
+        if (key === 'permission') {
+          openPermissionModal(target);
+          return;
+        }
+
+        if (key === 'delete') {
+          handleDelete(target);
+        }
+      },
+    },
+  });
 
   useEffect(() => {
     void loadAIConfig();
@@ -165,21 +244,30 @@ export default function SystemSettings() {
       setDepartments(nextDepartments);
       setPositions(nextPositions);
 
-      const nextSelectedUnitId = nextUnits.some((item) => item.id === selectedUnitId)
-        ? selectedUnitId
-        : (nextUnits[0]?.id ?? 0);
+      const nextSelectedUnitId =
+        selectedUnitId === UNASSIGNED_UNIT_ID
+          ? UNASSIGNED_UNIT_ID
+          : nextUnits.some((item) => item.id === selectedUnitId)
+            ? selectedUnitId
+            : (nextUnits[0]?.id ?? UNASSIGNED_UNIT_ID);
 
-      const nextSelectedDepartmentId = nextDepartments.some(
-        (item) => item.id === selectedDepartmentId && item.unitId === nextSelectedUnitId
-      )
-        ? selectedDepartmentId
-        : (nextDepartments.find((item) => item.unitId === nextSelectedUnitId)?.id ?? 0);
+      const nextSelectedDepartmentId =
+        nextSelectedUnitId === UNASSIGNED_UNIT_ID
+          ? 0
+          : nextDepartments.some(
+              (item) => item.id === selectedDepartmentId && item.unitId === nextSelectedUnitId
+            )
+            ? selectedDepartmentId
+            : (nextDepartments.find((item) => item.unitId === nextSelectedUnitId)?.id ?? 0);
 
-      const nextSelectedPositionId = nextPositions.some(
-        (item) => item.id === selectedPositionId && item.departmentId === nextSelectedDepartmentId
-      )
-        ? selectedPositionId
-        : (nextPositions.find((item) => item.departmentId === nextSelectedDepartmentId)?.id ?? 0);
+      const nextSelectedPositionId =
+        nextSelectedUnitId === UNASSIGNED_UNIT_ID
+          ? 0
+          : nextPositions.some(
+              (item) => item.id === selectedPositionId && item.departmentId === nextSelectedDepartmentId
+            )
+            ? selectedPositionId
+            : (nextPositions.find((item) => item.departmentId === nextSelectedDepartmentId)?.id ?? 0);
 
       setSelectedUnitId(nextSelectedUnitId);
       setSelectedDepartmentId(nextSelectedDepartmentId);
@@ -200,19 +288,16 @@ export default function SystemSettings() {
     }
   };
 
-  const loadRegisteredUsers = async () => {
-    setRegisteredUsersLoading(true);
+  const loadUnassignedPeople = async () => {
     try {
-      const response = await api.get('/user/list');
-      setRegisteredUsers((response.data.users ?? []) as RegisteredUserItem[]);
+      const response = await api.get('/org/unassigned-people');
+      setPeople((response.data.people ?? []) as OrgPersonItem[]);
     } catch (error) {
-      console.error('加载注册用户失败:', error);
-      message.error('加载注册用户失败');
-      setRegisteredUsers([]);
-    } finally {
-      setRegisteredUsersLoading(false);
+      console.error('加载未配置人员失败:', error);
+      setPeople([]);
     }
   };
+
   const handleSave = async (values: AIConfigForm) => {
     setSaveLoading(true);
     try {
@@ -250,94 +335,207 @@ export default function SystemSettings() {
 
   const baseUrlPlaceholder =
     selectedProvider === 'anthropic' ? 'https://api.anthropic.com' : 'https://api.openai.com/v1';
-
-
-  const registeredUserColumns: TableProps<RegisteredUserItem>['columns'] = [
-    {
-      title: 'ID',
-      dataIndex: 'id',
-      width: 72,
-      align: 'center',
-    },
-    {
-      title: '姓名',
-      dataIndex: 'name',
-      width: 120,
-      render: (value) => value || '-',
-    },
-    {
-      title: '性别',
-      dataIndex: 'gender',
-      width: 90,
-      align: 'center',
-      render: (value) => {
-        if (!value) {
-          return '-';
-        }
-        const label = value === 'male' ? '男' : value === 'female' ? '女' : '未知';
-        const color = value === 'male' ? 'blue' : value === 'female' ? 'magenta' : 'default';
-        return <Tag color={color}>{label}</Tag>;
+  const displayedUnits = useMemo(
+    () => [
+      {
+        id: UNASSIGNED_UNIT_ID,
+        name: UNASSIGNED_UNIT_NAME,
+        ...defaultVisibilitySettings,
       },
-    },
-    {
-      title: '手机号',
-      dataIndex: 'phone',
-      width: 140,
-      render: (value) => value || '-',
-    },
-    {
-      title: '邮箱',
-      dataIndex: 'email',
-      ellipsis: true,
-    },
-    {
-      title: '单位',
-      dataIndex: 'unitName',
-      ellipsis: true,
-      render: (value) => value || '-',
-    },
-    {
-      title: '部门',
-      dataIndex: 'departmentName',
-      ellipsis: true,
-      render: (value) => value || '-',
-    },
-    {
-      title: '职位',
-      dataIndex: 'positionName',
-      ellipsis: true,
-      render: (value) => value || '-',
-    },
-    {
-      title: '注册时间',
-      dataIndex: 'createdAt',
-      width: 180,
-      render: (value) => formatToDayStart(value),
-    },
-    {
-      title: '最后登录',
-      dataIndex: 'lastLogin',
-      width: 180,
-      render: (value) => formatToDayStart(value),
-    },
-    {
-      title: '在线状态',
-      dataIndex: 'isOnline',
-      width: 110,
-      align: 'center',
-      render: (_value, record) => {
-        if (!record.lastLogin) {
-          return <Tag>未登录</Tag>;
+      ...units,
+    ],
+    [units],
+  );
+  const currentDepartments =
+    selectedUnitId === UNASSIGNED_UNIT_ID
+      ? []
+      : departments.filter((item) => item.unitId === selectedUnitId);
+  const currentPositions =
+    selectedUnitId === UNASSIGNED_UNIT_ID
+      ? []
+      : positions.filter((item) => item.departmentId === selectedDepartmentId);
+  const currentPeople = people;
+
+  const orgTypeLabelMap: Record<OrgContextType, string> = {
+    unit: '单位',
+    department: '部门',
+    position: '职位',
+    person: '人员',
+  };
+
+  const openRenameModal = (target: RenameTarget) => {
+    setRenameTarget(target);
+    setRenameValue(target.name);
+  };
+
+  const closeRenameModal = () => {
+    setRenameTarget(null);
+    setRenameValue('');
+    setRenameSubmitting(false);
+  };
+
+  const openPermissionModal = (target: RenameTarget) => {
+    setPermissionTarget(target);
+    setPermissionValues(normalizeVisibilitySettings(target));
+    setPermissionSubmitting(false);
+  };
+
+  const closePermissionModal = () => {
+    setPermissionTarget(null);
+    setPermissionValues(defaultVisibilitySettings);
+    setPermissionSubmitting(false);
+  };
+
+  const applyPermissionUpdate = (target: RenameTarget, nextVisibility: VisibilitySettings) => {
+    if (target.type === 'unit') {
+      setUnits((prev) =>
+        prev.map((item) =>
+          item.id === target.id
+            ? {
+                ...item,
+                ...nextVisibility,
+              }
+            : item,
+        ),
+      );
+      return;
+    }
+
+    if (target.type === 'department') {
+      setDepartments((prev) =>
+        prev.map((item) =>
+          item.id === target.id
+            ? {
+                ...item,
+                ...nextVisibility,
+              }
+            : item,
+        ),
+      );
+      return;
+    }
+
+    if (target.type === 'position') {
+      setPositions((prev) =>
+        prev.map((item) =>
+          item.id === target.id
+            ? {
+                ...item,
+                ...nextVisibility,
+              }
+            : item,
+        ),
+      );
+      return;
+    }
+
+    setPeople((prev) =>
+      prev.map((item) =>
+        item.id === target.id
+          ? {
+              ...item,
+              ...nextVisibility,
+            }
+          : item,
+      ),
+    );
+  };
+
+  const handleRename = async () => {
+    if (!renameTarget) {
+      return;
+    }
+
+    const name = renameValue.trim();
+    if (!name) {
+      message.error(`请输入${orgTypeLabelMap[renameTarget.type]}名称`);
+      return;
+    }
+
+    setRenameSubmitting(true);
+    try {
+      if (renameTarget.type === 'unit') {
+        await api.put(`/org/units/${renameTarget.id}`, { name });
+        await loadOrgStructure();
+      } else if (renameTarget.type === 'department') {
+        await api.put(`/org/departments/${renameTarget.id}`, { name });
+        await loadOrgStructure();
+      } else if (renameTarget.type === 'position') {
+        await api.put(`/org/positions/${renameTarget.id}`, { name });
+        await loadOrgStructure();
+      } else {
+        await api.put(`/org/people/${renameTarget.id}`, { name });
+        if (selectedPositionId) {
+          await loadPositionPeople(selectedPositionId);
         }
+      }
 
-        return record.isOnline ? <Tag color="success">在线</Tag> : <Tag>离线</Tag>;
+      message.success(`${orgTypeLabelMap[renameTarget.type]}重命名成功`);
+      closeRenameModal();
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '操作失败');
+      setRenameSubmitting(false);
+    }
+  };
+
+  const handleSavePermission = async () => {
+    if (!permissionTarget) {
+      return;
+    }
+
+    setPermissionSubmitting(true);
+    try {
+      await api.put(`/org/permissions/${permissionTarget.type}/${permissionTarget.id}`, permissionValues);
+
+      applyPermissionUpdate(permissionTarget, permissionValues);
+      message.success(`${orgTypeLabelMap[permissionTarget.type]}权限更新成功`);
+      closePermissionModal();
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '权限更新失败');
+      setPermissionSubmitting(false);
+    }
+  };
+
+  const handleDelete = (target: RenameTarget) => {
+    Modal.confirm({
+      title: `删除${orgTypeLabelMap[target.type]}`,
+      content:
+        target.type === 'person'
+          ? '确定要将该人员从当前单位中移除吗？此操作不会删除账号，但会清空其单位、部门和职位。'
+          : `确定要删除该${orgTypeLabelMap[target.type]}吗？`,
+      okText: '确定',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: async () => {
+        try {
+          if (target.type === 'unit') {
+            await api.delete(`/org/units/${target.id}`);
+            await loadOrgStructure();
+          } else if (target.type === 'department') {
+            await api.delete(`/org/departments/${target.id}`);
+            await loadOrgStructure();
+          } else if (target.type === 'position') {
+            await api.delete(`/org/positions/${target.id}`);
+            await loadOrgStructure();
+          } else if (target.positionId) {
+            await api.delete(`/org/positions/${target.positionId}/people/${target.id}`);
+            await loadPositionPeople(target.positionId);
+          }
+
+          message.success(`${orgTypeLabelMap[target.type]}删除成功`);
+        } catch (error: any) {
+          message.error(error.response?.data?.message || '删除失败');
+          throw error;
+        }
       },
-    },
-  ];
+    });
+  };
 
-  const currentDepartments = departments.filter((item) => item.unitId === selectedUnitId);
-  const currentPositions = positions.filter((item) => item.departmentId === selectedDepartmentId);
-  const currentPeople = people.filter((item) => item.positionId === selectedPositionId);
+  const getContextMenuProps = (target: RenameTarget): { menu: MenuProps; trigger: ['contextMenu'] } =>
+    getContextMenuWithPermissionProps(target);
+
+  const getPersonContextMenuProps = (target: RenameTarget): { menu: MenuProps; trigger: ['contextMenu'] } =>
+    getPersonContextMenuWithPermissionProps(target);
 
   useEffect(() => {
     const isValid = departments.some(
@@ -362,12 +560,47 @@ export default function SystemSettings() {
   }, [selectedDepartmentId, positions, selectedPositionId]);
 
   useEffect(() => {
+    if (selectedUnitId === UNASSIGNED_UNIT_ID) {
+      void loadUnassignedPeople();
+      return;
+    }
+
     if (!selectedPositionId) {
       setPeople([]);
       return;
     }
     void loadPositionPeople(selectedPositionId);
-  }, [selectedPositionId]);
+  }, [selectedPositionId, selectedUnitId]);
+
+  useEffect(() => {
+    const socket = ensureRealtimeConnection();
+    if (!socket) {
+      return;
+    }
+
+    const handleUserDirectoryUpdated = (_payload: UserDirectoryUpdatedEvent) => {
+      if (selectedUnitId === UNASSIGNED_UNIT_ID) {
+        void loadUnassignedPeople();
+        return;
+      }
+
+      if (selectedPositionId) {
+        void loadPositionPeople(selectedPositionId);
+      }
+    };
+
+    const handleOrgStructureUpdated = (_payload: OrgStructureUpdatedEvent) => {
+      void loadOrgStructure();
+    };
+
+    socket.on('user:directory-updated', handleUserDirectoryUpdated);
+    socket.on('org:structure-updated', handleOrgStructureUpdated);
+
+    return () => {
+      socket.off('user:directory-updated', handleUserDirectoryUpdated);
+      socket.off('org:structure-updated', handleOrgStructureUpdated);
+    };
+  }, [selectedPositionId, selectedUnitId]);
 
   const openAddUnitModal = () => {
     setAddUnitName('');
@@ -375,7 +608,7 @@ export default function SystemSettings() {
   };
 
   const openAddDepartmentModal = () => {
-    if (!selectedUnitId) {
+    if (selectedUnitId <= 0) {
       message.warning('请先选择单位');
       return;
     }
@@ -421,7 +654,7 @@ export default function SystemSettings() {
       return;
     }
 
-    if (!selectedUnitId) {
+    if (selectedUnitId <= 0) {
       message.error('请先选择单位');
       return;
     }
@@ -469,14 +702,12 @@ export default function SystemSettings() {
     <div className="system-settings-page-root">
       <Card className="system-settings-card" bordered={false}>
         <Tabs
-          defaultActiveKey="ai"
+          activeKey={activeTabKey}
           onChange={(key) => {
-            if (key === 'users') {
-              void loadRegisteredUsers();
-            }
+            setActiveTabKey(key);
           }}
         >
-          <TabPane tab="AI配置" key="ai">
+          <TabPane tab="AI" key="ai">
             <Form
               form={form}
               layout="vertical"
@@ -623,7 +854,7 @@ export default function SystemSettings() {
                   <Form.Item
                     label="Top P（可选）"
                     name="topP"
-                    extra="核采样参数。1 表示不限制；一般只需与 Temperature 二选一微调。"
+                    extra="核采样参数。1 表示不限制；一般只需和 Temperature 二选一微调。"
                   >
                     <InputNumber
                       min={0}
@@ -685,15 +916,48 @@ export default function SystemSettings() {
                 </Col>
               </Row>
             </Form>
+            <Modal
+              title={permissionTarget ? `${orgTypeLabelMap[permissionTarget.type]}权限` : '权限'}
+              open={Boolean(permissionTarget)}
+              okText="保存"
+              cancelText="取消"
+              onOk={() => void handleSavePermission()}
+              onCancel={closePermissionModal}
+              confirmLoading={permissionSubmitting}
+            >
+              <Form layout="vertical">
+                {permissionFieldOptions.map((item) => (
+                  <Form.Item key={item.key} label={item.label}>
+                    <Switch
+                      checked={permissionValues[item.key]}
+                      onChange={(checked) =>
+                        setPermissionValues((prev) => ({
+                          ...prev,
+                          [item.key]: checked,
+                        }))
+                      }
+                    />
+                  </Form.Item>
+                ))}
+                <div style={{ color: 'rgba(0, 0, 0, 0.45)', fontSize: 12 }}>
+                  关闭后，此{permissionTarget ? orgTypeLabelMap[permissionTarget.type] : '对象'}将无法看到对应页面或菜单。
+                </div>
+              </Form>
+            </Modal>
           </TabPane>
 
-          <TabPane tab="单位配置" key="org">
+          <TabPane tab="单位&权限" key="org">
             <div className="system-settings-org-root">
               <Row gutter={[16, 16]} className="system-settings-org-grid">
                 <Col xs={24} sm={12} lg={6} className="system-settings-org-col">
                   <Card
                     size="small"
-                    title="单位"
+                    title={
+                      <span>
+                        单位
+                        <span className="system-settings-org-card__count">{`${displayedUnits.length}个`}</span>
+                      </span>
+                    }
                     className="system-settings-org-card"
                     extra={
                       <Tooltip title="新增单位">
@@ -708,13 +972,10 @@ export default function SystemSettings() {
                       </Tooltip>
                     }
                   >
-                    {units.length === 0 ? (
-                      <Empty description="暂无单位" />
-                    ) : (
-                      <div className="system-settings-org-list">
-                        {units.map((item) => (
+                    <div className="system-settings-org-list">
+                      {displayedUnits.map((item) => {
+                        const unitNode = (
                           <div
-                            key={item.id}
                             className={`system-settings-org-list__item ${
                               item.id === selectedUnitId ? 'is-active' : ''
                             }`}
@@ -729,16 +990,39 @@ export default function SystemSettings() {
                           >
                             <div className="system-settings-org-list__title">{item.name}</div>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        );
+
+                        if (item.id === UNASSIGNED_UNIT_ID) {
+                          return <div key={item.id}>{unitNode}</div>;
+                        }
+
+                        return (
+                          <Dropdown
+                            key={item.id}
+                            {...getContextMenuProps({
+                              type: 'unit',
+                              id: item.id,
+                              name: item.name,
+                              ...normalizeVisibilitySettings(item),
+                            })}
+                          >
+                            {unitNode}
+                          </Dropdown>
+                        );
+                      })}
+                    </div>
                   </Card>
                 </Col>
 
                 <Col xs={24} sm={12} lg={6} className="system-settings-org-col">
                   <Card
                     size="small"
-                    title="部门"
+                    title={
+                      <span>
+                        部门
+                        <span className="system-settings-org-card__count">{`${currentDepartments.length}个`}</span>
+                      </span>
+                    }
                     className="system-settings-org-card"
                     extra={
                       <Tooltip title="新增部门">
@@ -750,7 +1034,7 @@ export default function SystemSettings() {
                             icon={<PlusOutlined />}
                             aria-label="新增部门"
                             onClick={openAddDepartmentModal}
-                            disabled={!selectedUnitId}
+                            disabled={selectedUnitId <= 0}
                           />
                         </span>
                       </Tooltip>
@@ -761,22 +1045,31 @@ export default function SystemSettings() {
                     ) : (
                       <div className="system-settings-org-list">
                         {currentDepartments.map((item) => (
-                          <div
+                          <Dropdown
                             key={item.id}
-                            className={`system-settings-org-list__item ${
-                              item.id === selectedDepartmentId ? 'is-active' : ''
-                            }`}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setSelectedDepartmentId(item.id)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                setSelectedDepartmentId(item.id);
-                              }
-                            }}
+                            {...getContextMenuProps({
+                              type: 'department',
+                              id: item.id,
+                              name: item.name,
+                              ...normalizeVisibilitySettings(item),
+                            })}
                           >
-                            <div className="system-settings-org-list__title">{item.name}</div>
-                          </div>
+                            <div
+                              className={`system-settings-org-list__item ${
+                                item.id === selectedDepartmentId ? 'is-active' : ''
+                              }`}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setSelectedDepartmentId(item.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  setSelectedDepartmentId(item.id);
+                                }
+                              }}
+                            >
+                              <div className="system-settings-org-list__title">{item.name}</div>
+                            </div>
+                          </Dropdown>
                         ))}
                       </div>
                     )}
@@ -786,7 +1079,12 @@ export default function SystemSettings() {
                 <Col xs={24} sm={12} lg={6} className="system-settings-org-col">
                   <Card
                     size="small"
-                    title="职位"
+                    title={
+                      <span>
+                        职位
+                        <span className="system-settings-org-card__count">{`${currentPositions.length}个`}</span>
+                      </span>
+                    }
                     className="system-settings-org-card"
                     extra={
                       <Tooltip title="新增职位">
@@ -809,22 +1107,31 @@ export default function SystemSettings() {
                     ) : (
                       <div className="system-settings-org-list">
                         {currentPositions.map((item) => (
-                          <div
+                          <Dropdown
                             key={item.id}
-                            className={`system-settings-org-list__item ${
-                              item.id === selectedPositionId ? 'is-active' : ''
-                            }`}
-                            role="button"
-                            tabIndex={0}
-                            onClick={() => setSelectedPositionId(item.id)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter' || event.key === ' ') {
-                                setSelectedPositionId(item.id);
-                              }
-                            }}
+                            {...getContextMenuProps({
+                              type: 'position',
+                              id: item.id,
+                              name: item.name,
+                              ...normalizeVisibilitySettings(item),
+                            })}
                           >
-                            <div className="system-settings-org-list__title">{item.name}</div>
-                          </div>
+                            <div
+                              className={`system-settings-org-list__item ${
+                                item.id === selectedPositionId ? 'is-active' : ''
+                              }`}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => setSelectedPositionId(item.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                  setSelectedPositionId(item.id);
+                                }
+                              }}
+                            >
+                              <div className="system-settings-org-list__title">{item.name}</div>
+                            </div>
+                          </Dropdown>
                         ))}
                       </div>
                     )}
@@ -832,26 +1139,36 @@ export default function SystemSettings() {
                 </Col>
 
                 <Col xs={24} sm={12} lg={6} className="system-settings-org-col">
-                  <Card size="small" title="人员" className="system-settings-org-card">
+                  <Card
+                    size="small"
+                    title={
+                      <span>
+                        人员
+                        <span className="system-settings-org-card__count">{`${currentPeople.length}人`}</span>
+                      </span>
+                    }
+                    className="system-settings-org-card"
+                  >
                     {currentPeople.length === 0 ? (
                       <Empty description="暂无人员" />
                     ) : (
                       <div className="system-settings-org-list">
-                        {currentPeople.map((item) => {
-                          const details = [
-                            item.email && item.email !== item.name ? item.email : null,
-                            item.phone ?? null,
-                          ]
-                            .filter(Boolean)
-                            .join(' · ');
-
-                          return (
-                            <div key={item.id} className="system-settings-org-list__item is-readonly">
+                        {currentPeople.map((item) => (
+                          <Dropdown
+                            key={item.id}
+                            {...getPersonContextMenuProps({
+                              type: 'person',
+                              id: item.id,
+                              name: item.name,
+                              positionId: item.positionId,
+                              ...normalizeVisibilitySettings(item),
+                            })}
+                          >
+                            <div className="system-settings-org-list__item is-readonly">
                               <div className="system-settings-org-list__title">{item.name}</div>
-                              {details && <div className="system-settings-org-list__sub">{details}</div>}
                             </div>
-                          );
-                        })}
+                          </Dropdown>
+                        ))}
                       </div>
                     )}
                   </Card>
@@ -924,28 +1241,31 @@ export default function SystemSettings() {
                 </Form.Item>
               </Form>
             </Modal>
+
+            <Modal
+              title={renameTarget ? `重命名${orgTypeLabelMap[renameTarget.type]}` : '重命名'}
+              open={Boolean(renameTarget)}
+              okText="保存"
+              cancelText="取消"
+              onOk={() => void handleRename()}
+              onCancel={closeRenameModal}
+              confirmLoading={renameSubmitting}
+              okButtonProps={{ disabled: !renameValue.trim() }}
+            >
+              <Form layout="vertical">
+                <Form.Item label={renameTarget ? `${orgTypeLabelMap[renameTarget.type]}名称` : '名称'} required>
+                  <Input
+                    autoFocus
+                    value={renameValue}
+                    placeholder={renameTarget ? `请输入${orgTypeLabelMap[renameTarget.type]}名称` : '请输入名称'}
+                    onChange={(event) => setRenameValue(event.target.value)}
+                    onPressEnter={() => void handleRename()}
+                  />
+                </Form.Item>
+              </Form>
+            </Modal>
           </TabPane>
 
-          <TabPane tab="用户配置" key="users">
-            <div style={{ padding: '16px 16px 24px' }}>
-              <Space style={{ marginBottom: 12 }}>
-                <Button onClick={() => void loadRegisteredUsers()} loading={registeredUsersLoading}>
-                  刷新
-                </Button>
-                <span style={{ color: 'rgba(0, 0, 0, 0.45)' }}>共 {registeredUsers.length} 个用户</span>
-              </Space>
-
-              <Table<RegisteredUserItem>
-                rowKey="id"
-                className="system-settings-user-table"
-                loading={registeredUsersLoading}
-                dataSource={registeredUsers}
-                columns={registeredUserColumns}
-                pagination={{ pageSize: 10, showSizeChanger: true }}
-                scroll={{ x: 1500 }}
-              />
-            </div>
-          </TabPane>
         </Tabs>
       </Card>
     </div>

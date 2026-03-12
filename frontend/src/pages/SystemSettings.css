@@ -28,6 +28,13 @@
   height: 100%;
 }
 
+.system-settings-org-card__count {
+  margin-left: 6px;
+  color: #8c8c8c;
+  font-size: 12px;
+  font-weight: 400;
+}
+
 .system-settings-org-card .ant-card-body {
   padding: 12px;
 }
@@ -77,4 +84,23 @@
 
 .system-settings-user-table .ant-table-thead > tr > th {
   text-align: center;
+}
+
+.system-settings-user-table .ant-table-tbody > tr > td {
+  text-align: center;
+}
+
+.system-settings-user-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.system-settings-user-toolbar__search {
+  width: 100%;
+}
+
+.system-settings-user-toolbar__select {
+  width: 100%;
 }

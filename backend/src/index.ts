@@ -1,4 +1,5 @@
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import authRoutes from './routes/auth';
@@ -9,33 +10,29 @@ import userRoutes from './routes/user';
 import { createUsersTable } from './models/user';
 import { createAIConfigTable, createConversationsTable, createMessagesTable } from './models/aiConfig';
 import { createOrgStructureTables } from './models/orgStructure';
+import { expressCorsOptions } from './config/cors';
+import { presenceService } from './services/presenceService';
+import { attachSocketServer } from './services/socketServer';
 
 dotenv.config();
 
 const app = express();
+const server = createServer(app);
 const PORT = process.env.PORT || 3000;
 
-// 中间件
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true,
-}));
-// Allow larger JSON payloads (e.g., base64 avatar data)
+app.use(cors(expressCorsOptions));
 app.use(express.json({ limit: '5mb' }));
 
-// 路由
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/ai-config', aiConfigRoutes);
 app.use('/api/org', orgRoutes);
 app.use('/api/user', userRoutes);
 
-// 健康检查
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', message: 'ZJZAI Backend is running' });
 });
 
-// 初始化数据库表
 const initDatabase = async () => {
   try {
     await createUsersTable();
@@ -43,14 +40,25 @@ const initDatabase = async () => {
     await createConversationsTable();
     await createMessagesTable();
     await createOrgStructureTables();
-    console.log('数据库表初始化成功');
+    console.log('Database tables initialized');
   } catch (error) {
-    console.error('数据库表初始化失败:', error);
+    console.error('Failed to initialize database tables:', error);
+    throw error;
   }
 };
 
-// 启动服务器
-app.listen(PORT, async () => {
+attachSocketServer(server);
+
+const bootstrap = async () => {
   await initDatabase();
-  console.log(`服务器运行在 http://localhost:${PORT}`);
+  await presenceService.initialize();
+
+  server.listen(PORT, () => {
+    console.log(`Server running at http://localhost:${PORT}`);
+  });
+};
+
+void bootstrap().catch((error) => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
 });
