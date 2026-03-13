@@ -20,13 +20,14 @@ export type UserDirectoryUpdatedEvent = {
 };
 
 export type OrgStructureUpdatedEvent = {
-  entityType: 'unit' | 'department' | 'position';
+  entityType: 'unitNature' | 'unit' | 'department' | 'position';
 };
 
 const SOCKET_SERVER_URL = getBackendOrigin();
 
 let socket: Socket | null = null;
 let activeToken: string | null = null;
+let publicSocket: Socket | null = null;
 
 const getToken = () => localStorage.getItem('token') || sessionStorage.getItem('token');
 
@@ -60,6 +61,27 @@ export const ensureRealtimeConnection = () => {
   return socket;
 };
 
+export const connectPublicRealtime = () => {
+  if (getToken()) {
+    return null;
+  }
+
+  if (publicSocket) {
+    return publicSocket;
+  }
+
+  publicSocket = io(SOCKET_SERVER_URL, {
+    transports: ['websocket', 'polling'],
+    withCredentials: true,
+  });
+
+  publicSocket.on('connect_error', (error) => {
+    console.error('公共实时连接失败:', error.message);
+  });
+
+  return publicSocket;
+};
+
 export const getRealtimeSocket = () => socket;
 
 export const disconnectRealtime = () => {
@@ -70,6 +92,15 @@ export const disconnectRealtime = () => {
 
   socket = null;
   activeToken = null;
+};
+
+export const disconnectPublicRealtime = () => {
+  if (publicSocket) {
+    publicSocket.removeAllListeners();
+    publicSocket.disconnect();
+  }
+
+  publicSocket = null;
 };
 
 export const emitPresenceActivity = () => {

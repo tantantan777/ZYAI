@@ -17,7 +17,7 @@ export const sendVerificationCode = async (email: string, code: string) => {
   const mailOptions = {
     from: process.env.EMAIL_USER,
     to: email,
-    subject: 'ZJZAI建筑项目管理平台 - 验证码',
+    subject: '万物方圆智能化建筑项目管理平台 - 验证码',
     html: `
       <div style="padding: 20px; font-family: Arial, sans-serif;">
         <h2>验证码登录</h2>
@@ -26,7 +26,7 @@ export const sendVerificationCode = async (email: string, code: string) => {
         <p>验证码有效期为5分钟，请勿泄露给他人。</p>
         <p>如果这不是您的操作，请忽略此邮件。</p>
         <hr style="margin: 20px 0; border: none; border-top: 1px solid #eee;">
-        <p style="color: #999; font-size: 12px;">ZJZAI建筑项目全生命周期管理平台</p>
+        <p style="color: #999; font-size: 12px;">万物方圆智能化建筑项目全生命周期管理平台</p>
       </div>
     `,
   };

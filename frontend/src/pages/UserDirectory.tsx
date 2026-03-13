@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Card, Input, Select, Table, Tag, message } from 'antd';
+import { Card, Input, Select, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
 import api from '../utils/api';
 import {
@@ -8,6 +8,7 @@ import {
   type PresenceUserEvent,
   type UserDirectoryUpdatedEvent,
 } from '../services/realtime';
+import { feedback as message } from '../utils/feedback';
 import './SystemSettings.css';
 
 interface OrgUnitItem {
@@ -36,6 +37,7 @@ interface RegisteredUserItem {
   unitName: string | null;
   departmentName: string | null;
   positionName: string | null;
+  hireDate: string | null;
   createdAt: string;
   lastLogin: string | null;
   isOnline: boolean;
@@ -70,7 +72,7 @@ export default function UserDirectory() {
     } catch (error) {
       console.error('加载组织结构失败:', error);
       if (!silent) {
-        message.error('加载组织结构失败');
+        message.error('组织结构加载失败，请稍后重试');
       }
     }
   };
@@ -83,7 +85,7 @@ export default function UserDirectory() {
     } catch (error) {
       console.error('加载用户列表失败:', error);
       if (!silent) {
-        message.error('加载用户列表失败');
+        message.error('用户列表加载失败，请稍后重试');
       }
       setUsers([]);
     } finally {
@@ -284,14 +286,14 @@ export default function UserDirectory() {
       render: (value) => value || '-',
     },
     {
-      title: '注册时间',
-      dataIndex: 'createdAt',
+      title: '入职时间',
+      dataIndex: 'hireDate',
       width: 126,
       render: (value) => formatDateOnly(value),
     },
     {
-      title: '最后登录',
-      dataIndex: 'lastLogin',
+      title: '注册时间',
+      dataIndex: 'createdAt',
       width: 126,
       render: (value) => formatDateOnly(value),
     },
@@ -355,9 +357,7 @@ export default function UserDirectory() {
             />
           </div>
 
-          <div style={{ marginBottom: 12, color: 'rgba(0, 0, 0, 0.45)' }}>
-            共 {filteredUsers.length} 个用户
-          </div>
+          <div style={{ marginBottom: 12, color: 'rgba(0, 0, 0, 0.45)' }}>共 {filteredUsers.length} 个用户</div>
 
           <Table<RegisteredUserItem>
             rowKey="id"

@@ -9,7 +9,7 @@ type SocketUserData = {
   email: string;
 };
 
-type OrgStructureEntityType = 'unit' | 'department' | 'position';
+type OrgStructureEntityType = 'unitNature' | 'unit' | 'department' | 'position';
 
 let ioInstance: Server | null = null;
 
@@ -18,7 +18,7 @@ export const emitUserProfileUpdated = (userId: number) => {
 };
 
 export const emitUserDirectoryUpdated = (userId: number) => {
-  ioInstance?.emit('user:directory-updated', { userId });
+  ioInstance?.to('authenticated').emit('user:directory-updated', { userId });
 };
 
 export const emitOrgStructureUpdated = (entityType: OrgStructureEntityType) => {
@@ -36,7 +36,8 @@ export const attachSocketServer = (server: HttpServer) => {
       parseBearerToken(socket.handshake.headers.authorization);
 
     if (!authToken) {
-      next(new Error('Missing auth token'));
+      socket.data.user = undefined;
+      next();
       return;
     }
 
@@ -55,16 +56,16 @@ export const attachSocketServer = (server: HttpServer) => {
   ioInstance = io;
 
   const unsubscribePresence = presenceService.onPresenceChange((payload) => {
-    io.emit('presence:user', payload);
+    io.to('authenticated').emit('presence:user', payload);
   });
 
   io.on('connection', (socket) => {
     const user = socket.data.user as SocketUserData | undefined;
     if (!user) {
-      socket.disconnect(true);
       return;
     }
 
+    socket.join('authenticated');
     socket.join(`user:${user.userId}`);
     void presenceService.addConnection(user.userId, user.email, socket.id);
 

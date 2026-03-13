@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from 'react';
+﻿import type { KeyboardEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import {
   Avatar,
@@ -13,7 +13,6 @@ import {
   Space,
   Spin,
   Typography,
-  message,
   Alert,
 } from 'antd';
 import type { MenuProps } from 'antd';
@@ -28,6 +27,8 @@ import {
   UserOutlined,
   SettingOutlined,
 } from '@ant-design/icons';
+import { openActionConfirmDialog, openDeleteDialog } from '../utils/confirm';
+import { feedback as message } from '../utils/feedback';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import './AIChat.css';
@@ -169,7 +170,7 @@ export default function AIChat() {
     } catch (error: any) {
       console.error('加载对话列表失败:', error);
       if (error.response?.status !== 401) {
-        message.error('加载对话列表失败');
+        message.error('对话列表加载失败，请稍后重试');
       }
     } finally {
       setLoading(false);
@@ -199,7 +200,7 @@ export default function AIChat() {
       );
     } catch (error: any) {
       console.error('加载消息失败:', error);
-      message.error('加载消息失败');
+      message.error('消息加载失败，请稍后重试');
     }
   };
 
@@ -234,7 +235,7 @@ export default function AIChat() {
       setInputValue('');
       setHistoryDrawerOpen(false);
     } catch (error: any) {
-      message.error(error.response?.data?.message || '创建对话失败');
+      message.error(error.response?.data?.message || '会话创建失败，请稍后重试');
     }
   };
 
@@ -273,17 +274,13 @@ export default function AIChat() {
       setRenameValue('');
       message.success('会话名称已更新');
     } catch (error: any) {
-      message.error(error.response?.data?.message || '重命名失败');
+      message.error(error.response?.data?.message || '会话重命名失败，请稍后重试');
     }
   };
 
   const handleDeleteConversation = (conversationId: number) => {
-    Modal.confirm({
-      title: '删除历史对话',
-      content: '删除后将无法恢复，是否继续？',
-      okText: '删除',
-      cancelText: '取消',
-      okButtonProps: { danger: true },
+    openDeleteDialog({
+      entityLabel: '历史对话',
       onOk: async () => {
         try {
           await axios.delete(
@@ -300,7 +297,7 @@ export default function AIChat() {
 
           message.success('历史对话已删除');
         } catch (error: any) {
-          message.error(error.response?.data?.message || '删除失败');
+          message.error(error.response?.data?.message || '会话删除失败，请稍后重试');
         }
       },
     });
@@ -374,17 +371,17 @@ export default function AIChat() {
     } catch (error: any) {
       if (error.response?.data?.code === 'NO_AI_CONFIG') {
         setHasAIConfig(false);
-        Modal.confirm({
-          title: '需要配置AI服务',
-          content: '您还没有配置AI服务，是否前往系统配置页面进行配置？',
+        openActionConfirmDialog({
+          actionLabel: '前往 AI 配置',
+          content: '当前未配置 AI 服务。是否前往系统配置继续设置？',
           okText: '前往配置',
-          cancelText: '稍后配置',
+          cancelText: '稍后再说',
           onOk: () => {
             navigate('/system-settings');
           },
         });
       } else {
-        message.error(error.response?.data?.message || '发送消息失败');
+        message.error(error.response?.data?.message || '消息发送失败，请稍后重试');
       }
       setConversations(prev =>
         prev.map(item =>
@@ -688,3 +685,4 @@ export default function AIChat() {
     </div>
   );
 }
+

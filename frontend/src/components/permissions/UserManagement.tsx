@@ -1,6 +1,8 @@
-import { Card, Table, Button, Space, Modal, Form, Input, Select, Tag, message } from 'antd';
+import { Card, Table, Button, Space, Modal, Form, Input, Select, Tag } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useState } from 'react';
+import { openDeleteDialog } from '../../utils/confirm';
+import { feedback as message } from '../../utils/feedback';
 
 interface User {
   id: number;
@@ -118,13 +120,11 @@ export default function UserManagement() {
   };
 
   const handleDelete = (record: User) => {
-    Modal.confirm({
-      title: '确认删除',
-      content: `确定要删除用户"${record.name}"吗？`,
-      okText: '确定',
-      cancelText: '取消',
+    openDeleteDialog({
+      entityLabel: '人员',
+      entityName: record.name,
       onOk: () => {
-        message.success('删除成功');
+        message.success('人员已删除');
       },
     });
   };
@@ -133,7 +133,7 @@ export default function UserManagement() {
     try {
       const values = await form.validateFields();
       console.log('提交数据:', values);
-      message.success(editingUser ? '修改成功' : '添加成功');
+      message.success(editingUser ? '人员已更新' : '人员已添加');
       setIsModalOpen(false);
     } catch (error) {
       console.error('表单验证失败:', error);

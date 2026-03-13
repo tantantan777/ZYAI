@@ -1,7 +1,7 @@
 import axios from 'axios';
-import { notification } from 'antd';
 import { disconnectRealtime } from '../services/realtime';
 import { getApiBaseUrl } from './backendUrl';
+import { feedback as message } from './feedback';
 
 const api = axios.create({
   baseURL: getApiBaseUrl(),
@@ -37,7 +37,7 @@ api.interceptors.response.use(
     }
 
     if (error.response?.status === 403) {
-      notification.warning({
+      message.warning({
         message: '无权限',
         description: error.response?.data?.message || '你没有访问当前功能的权限，请联系管理员。',
         placement: 'topRight',

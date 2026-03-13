@@ -1,6 +1,8 @@
-import { Card, Table, Button, Space, Modal, Form, Input, Select, message } from 'antd';
+import { Card, Table, Button, Space, Modal, Form, Input, Select } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useState } from 'react';
+import { openDeleteDialog } from '../../utils/confirm';
+import { feedback as message } from '../../utils/feedback';
 
 interface Organization {
   id: number;
@@ -99,13 +101,11 @@ export default function OrganizationManagement() {
   };
 
   const handleDelete = (record: Organization) => {
-    Modal.confirm({
-      title: '确认删除',
-      content: `确定要删除单位"${record.name}"吗？`,
-      okText: '确定',
-      cancelText: '取消',
+    openDeleteDialog({
+      entityLabel: '单位',
+      entityName: record.name,
       onOk: () => {
-        message.success('删除成功');
+        message.success('单位已删除');
       },
     });
   };
@@ -114,7 +114,7 @@ export default function OrganizationManagement() {
     try {
       const values = await form.validateFields();
       console.log('提交数据:', values);
-      message.success(editingOrg ? '修改成功' : '添加成功');
+      message.success(editingOrg ? '单位已更新' : '单位已添加');
       setIsModalOpen(false);
     } catch (error) {
       console.error('表单验证失败:', error);

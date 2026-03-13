@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import dayjs, { type Dayjs } from 'dayjs';
-import { Button, Checkbox, DatePicker, Form, Input, Modal, Select, notification } from 'antd';
+import { Button, Checkbox, DatePicker, Form, Input, Modal, Select } from 'antd';
 import { MailOutlined, NumberOutlined, PhoneOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -10,8 +10,10 @@ import {
   type RegistrationOrgPosition,
   type RegistrationOrgUnit,
 } from '../services/authService';
+import { connectPublicRealtime, disconnectPublicRealtime, type OrgStructureUpdatedEvent } from '../services/realtime';
 import ServiceTerms from '../components/ServiceTerms';
 import PrivacyPolicy from '../components/PrivacyPolicy';
+import { feedback as message } from '../utils/feedback';
 import './Login.css';
 
 type ViewType = 'login' | 'terms' | 'privacy';
@@ -108,7 +110,7 @@ export default function Login() {
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [isEmailValid, setIsEmailValid] = useState(false);
   const [isCodeFilled, setIsCodeFilled] = useState(false);
-  const [isAgreementChecked, setIsAgreementChecked] = useState(false);
+  const [isAgreementChecked, setIsAgreementChecked] = useState(true);
   const [registrationModalOpen, setRegistrationModalOpen] = useState(false);
   const [currentView, setCurrentView] = useState<ViewType>('login');
   const [isExistingUser, setIsExistingUser] = useState<boolean | null>(null);
@@ -196,19 +198,52 @@ export default function Login() {
     setRegistrationModalOpen(true);
   };
 
-  const loadRegistrationOrgStructure = async () => {
+  const applyRegistrationOrgStructure = (
+    nextUnits: RegistrationOrgUnit[],
+    nextDepartments: RegistrationOrgDepartment[],
+    nextPositions: RegistrationOrgPosition[],
+  ) => {
+    setUnits(nextUnits);
+    setDepartments(nextDepartments);
+    setPositions(nextPositions);
+
+    const currentUnitId = form.getFieldValue('unitId');
+    const currentDepartmentId = form.getFieldValue('departmentId');
+    const currentPositionId = form.getFieldValue('positionId');
+
+    const normalizedUnitId =
+      typeof currentUnitId === 'number' && nextUnits.some((item) => item.id === currentUnitId) ? currentUnitId : undefined;
+    const normalizedDepartmentId =
+      typeof currentDepartmentId === 'number' &&
+      normalizedUnitId !== undefined &&
+      nextDepartments.some((item) => item.id === currentDepartmentId && item.unitId === normalizedUnitId)
+        ? currentDepartmentId
+        : undefined;
+    const normalizedPositionId =
+      typeof currentPositionId === 'number' &&
+      normalizedDepartmentId !== undefined &&
+      nextPositions.some((item) => item.id === currentPositionId && item.departmentId === normalizedDepartmentId)
+        ? currentPositionId
+        : undefined;
+
+    setSelectedUnitId(normalizedUnitId);
+    setSelectedDepartmentId(normalizedDepartmentId);
+    form.setFieldsValue({
+      unitId: normalizedUnitId,
+      departmentId: normalizedDepartmentId,
+      positionId: normalizedPositionId,
+    });
+  };
+
+  const loadRegistrationOrgStructure = async (silent = false) => {
     try {
       const response = await authService.getRegistrationOrgStructure();
-      setUnits(response.units ?? []);
-      setDepartments(response.departments ?? []);
-      setPositions(response.positions ?? []);
+      applyRegistrationOrgStructure(response.units ?? [], response.departments ?? [], response.positions ?? []);
     } catch (error) {
       console.error('加载注册组织结构失败', error);
-      notification.error({
-        message: '加载失败',
-        description: '无法获取单位、部门和职位数据，请稍后重试。',
-        placement: 'topRight',
-      });
+      if (!silent) {
+        message.error('注册资料选项加载失败，请稍后重试');
+      }
     }
   };
 
@@ -224,6 +259,24 @@ export default function Login() {
       restoreCooldown(initialValues.email);
     }
   }, [form]);
+
+  useEffect(() => {
+    const socket = connectPublicRealtime();
+    if (!socket) {
+      return;
+    }
+
+    const handleOrgStructureUpdated = (_payload: OrgStructureUpdatedEvent) => {
+      void loadRegistrationOrgStructure(true);
+    };
+
+    socket.on('org:structure-updated', handleOrgStructureUpdated);
+
+    return () => {
+      socket.off('org:structure-updated', handleOrgStructureUpdated);
+      disconnectPublicRealtime();
+    };
+  }, []);
 
   useEffect(() => {
     if (countdown <= 0 || !sentCodeEmail) {
@@ -260,7 +313,7 @@ export default function Login() {
     const email = form.getFieldValue('email');
 
     if (!email) {
-      notification.warning({
+      message.warning({
         message: '提示',
         description: '请输入邮箱地址。',
         placement: 'topRight',
@@ -269,7 +322,7 @@ export default function Login() {
     }
 
     if (!validateEmail(email)) {
-      notification.warning({
+      message.warning({
         message: '提示',
         description: '请输入有效的邮箱地址。',
         placement: 'topRight',
@@ -289,7 +342,7 @@ export default function Login() {
         resetRegistrationFields();
       }
 
-      notification.success({
+      message.success({
         message: '发送成功',
         description: response.isExistingUser
           ? '验证码已发送，请直接登录。'
@@ -309,7 +362,7 @@ export default function Login() {
           setCooldownForEmail(email, remainingTime);
         }
 
-        notification.warning({
+        message.warning({
           message: '操作过于频繁',
           description: error.response?.data?.message || '请稍后再试。',
           placement: 'topRight',
@@ -317,7 +370,7 @@ export default function Login() {
         return;
       }
 
-      notification.error({
+      message.error({
         message: '发送失败',
         description: error.response?.data?.message || '发送验证码失败，请稍后重试。',
         placement: 'topRight',
@@ -385,16 +438,16 @@ export default function Login() {
       storage.setItem('user', JSON.stringify(response.user));
       storage.setItem('remember', values.remember ? 'true' : 'false');
 
-      notification.success({
+      message.success({
         message: '登录成功',
-        description: '欢迎使用 ZJZAI 建筑项目全生命周期管理平台。',
+        description: '欢迎使用 万物方圆智能化 建筑项目全生命周期管理平台。',
         placement: 'topRight',
       });
 
       navigate(getTargetPath(response.user));
       return true;
     } catch (error: any) {
-      notification.error({
+      message.error({
         message: '登录失败',
         description: error.response?.data?.message || '登录失败，请检查验证码或补全注册资料。',
         placement: 'topRight',
@@ -427,7 +480,7 @@ export default function Login() {
         {currentView === 'privacy' && <PrivacyPolicy onBack={() => setCurrentView('login')} />}
         {currentView === 'login' && (
           <div className="brand-info">
-            <h1>ZJZAI</h1>
+            <h1>万物方圆智能化</h1>
             <p>建筑项目全生命周期管理平台</p>
             <p className="brand-description">
               基于云计算和数据能力，为建筑行业提供统一、可追踪、可协同的数字化管理平台。
@@ -460,12 +513,13 @@ export default function Login() {
       <div className="login-right">
         <div className="login-box">
           <div className="login-header">
-            <h2>ZJZAI 建筑项目全生命周期管理平台</h2>
+            <h2>万物方圆智能化 建筑项目全生命周期管理平台</h2>
             <p>欢迎登录系统</p>
           </div>
 
           <Form<LoginFormValues>
             form={form}
+            initialValues={{ remember: true, agreement: true }}
             onValuesChange={handleValuesChange}
             layout="vertical"
             className="login-form"
@@ -756,7 +810,7 @@ export default function Login() {
           </Form>
 
           <div className="login-footer">
-            <p>© 2026 ZJZAI 建筑项目全生命周期管理平台 | 版本 v1.0.0</p>
+            <p>© 2026 万物方圆智能化 建筑项目全生命周期管理平台 | 版本 v1.0.0</p>
             <p>
               <a href="#" className="footer-link">
                 沪ICP备 xxxxxx 号

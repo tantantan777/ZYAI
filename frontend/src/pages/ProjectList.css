@@ -10,3 +10,40 @@
   padding: 16px 16px 24px;
 }
 
+.project-list-page-body .ant-table-thead > tr > th,
+.project-list-page-body .ant-table-tbody > tr > td {
+  text-align: center;
+}
+
+.project-list-table-row {
+  cursor: context-menu;
+}
+
+.project-list-context-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 140px;
+  padding: 6px 0;
+  background: #fff;
+  border: 1px solid rgba(5, 5, 5, 0.08);
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.project-list-context-menu button {
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 14px;
+  cursor: pointer;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.project-list-context-menu button:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.project-list-context-menu button.danger {
+  color: #ff4d4f;
+}

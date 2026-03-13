@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+﻿import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { ProLayout } from '@ant-design/pro-components';
 import {
@@ -10,9 +10,11 @@ import {
   TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
-import { Avatar, Button, Modal, Popover, Tooltip, notification } from 'antd';
+import { Avatar, Button, Popover, Tooltip } from 'antd';
 import { disconnectRealtime, ensureRealtimeConnection, type UserProfileUpdatedEvent } from '../services/realtime';
 import api from '../utils/api';
+import { openActionConfirmDialog } from '../utils/confirm';
+import { feedback as message } from '../utils/feedback';
 
 type LayoutUser = {
   id?: number;
@@ -172,7 +174,7 @@ export default function MainLayout() {
   };
 
   const showPermissionDenied = (featureName: string) => {
-    notification.warning({
+    message.warning({
       message: '无权限',
       description: `你没有打开${featureName}的权限，请联系管理员。`,
       placement: 'topRight',
@@ -265,11 +267,10 @@ export default function MainLayout() {
   );
 
   const handleLogout = () => {
-    Modal.confirm({
-      title: '确认退出',
-      content: '确定要退出登录吗？',
-      okText: '确定',
-      cancelText: '取消',
+    openActionConfirmDialog({
+      actionLabel: '退出登录',
+      content: '退出后需要重新登录才可继续使用。是否继续？',
+      okText: '退出登录',
       onOk: () => {
         disconnectRealtime();
         localStorage.removeItem('token');
@@ -294,7 +295,7 @@ export default function MainLayout() {
 
   return (
     <ProLayout
-      title="ZJZAI建筑项目管理平台"
+      title="万物方圆智能化建筑项目管理平台"
       logo={false}
       layout="mix"
       location={location}
@@ -386,3 +387,4 @@ export default function MainLayout() {
     </ProLayout>
   );
 }
+

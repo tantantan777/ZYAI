@@ -22,7 +22,7 @@ export default function PrivacyPolicy({ onBack }: PrivacyPolicyProps) {
       <div className="terms-content">
         <h2>引言</h2>
         <p>
-          ZJZAI建筑项目全生命周期管理平台（以下简称"我们"或"本平台"）深知个人信息对您的重要性，
+          万物方圆智能化建筑项目全生命周期管理平台（以下简称"我们"或"本平台"）深知个人信息对您的重要性，
           我们将按照法律法规要求，采取相应的安全保护措施，保护您的个人信息安全可控。
         </p>
 

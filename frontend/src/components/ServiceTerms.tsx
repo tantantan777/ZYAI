@@ -22,7 +22,7 @@ export default function ServiceTerms({ onBack }: ServiceTermsProps) {
       <div className="terms-content">
         <h2>1. 服务说明</h2>
         <p>
-          欢迎使用ZJZAI建筑项目全生命周期管理平台（以下简称"本平台"）。本平台致力于为建筑行业提供专业的项目管理服务，
+          欢迎使用万物方圆智能化建筑项目全生命周期管理平台（以下简称"本平台"）。本平台致力于为建筑行业提供专业的项目管理服务，
           涵盖项目规划、设计、施工、验收等全生命周期管理功能。
         </p>
 

@@ -2,8 +2,19 @@ import pool from '../config/database';
 
 export const createOrgStructureTables = async () => {
   const query = `
+    CREATE TABLE IF NOT EXISTS org_unit_natures (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(200) NOT NULL,
+      org_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(name)
+    );
+
     CREATE TABLE IF NOT EXISTS org_units (
       id SERIAL PRIMARY KEY,
+      unit_nature_id INTEGER,
       name VARCHAR(200) NOT NULL,
       dashboard_visible BOOLEAN NOT NULL DEFAULT TRUE,
       ai_chat_visible BOOLEAN NOT NULL DEFAULT TRUE,
@@ -60,6 +71,27 @@ export const createOrgStructureTables = async () => {
   `;
 
   await pool.query(query);
+  await pool.query('ALTER TABLE org_unit_natures ADD COLUMN IF NOT EXISTS org_enabled BOOLEAN NOT NULL DEFAULT FALSE;');
+  await pool.query('ALTER TABLE org_unit_natures ALTER COLUMN org_enabled SET DEFAULT FALSE;');
+  await pool.query('UPDATE org_unit_natures SET org_enabled = FALSE WHERE org_enabled IS NULL;');
+  await pool.query('ALTER TABLE org_units ADD COLUMN IF NOT EXISTS unit_nature_id INTEGER;');
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_org_units_unit_nature_id'
+      ) THEN
+        ALTER TABLE org_units
+          ADD CONSTRAINT fk_org_units_unit_nature_id
+          FOREIGN KEY (unit_nature_id)
+          REFERENCES org_unit_natures(id)
+          ON DELETE CASCADE;
+      END IF;
+    END $$;
+  `);
+  await pool.query('CREATE INDEX IF NOT EXISTS idx_org_units_unit_nature_id ON org_units(unit_nature_id);');
 
   const visibilityColumns = [
     'dashboard_visible',

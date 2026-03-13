@@ -10,6 +10,7 @@ type VisibilitySettings = {
   systemSettingsVisible: boolean;
 };
 
+const unitNatureReturningSql = 'id, name, org_enabled as "orgEnabled"';
 const visibilitySelectSql = `
   dashboard_visible as "dashboardVisible",
   ai_chat_visible as "aiChatVisible",
@@ -26,7 +27,7 @@ const userVisibilitySelectSql = `
   u.system_settings_visible as "systemSettingsVisible"
 `;
 
-const unitReturningSql = `id, name, ${visibilitySelectSql}`;
+const unitReturningSql = `id, unit_nature_id as "unitNatureId", name, ${visibilitySelectSql}`;
 const departmentReturningSql = `id, unit_id as "unitId", name, ${visibilitySelectSql}`;
 const positionReturningSql = `id, department_id as "departmentId", name, ${visibilitySelectSql}`;
 const personReturningSql = `id, email, name, phone, ${visibilitySelectSql}`;
@@ -48,6 +49,26 @@ function normalizeName(value: unknown): string {
 
 function parseRequiredBoolean(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
+}
+
+function parsePositiveIntArray(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const seen = new Set<number>();
+  const result: number[] = [];
+
+  for (const item of value) {
+    const parsed = parseRequiredInt(item);
+    if (!parsed || seen.has(parsed)) {
+      continue;
+    }
+    seen.add(parsed);
+    result.push(parsed);
+  }
+
+  return result;
 }
 
 function parseVisibilitySettings(value: unknown): VisibilitySettings | null {
@@ -137,6 +158,20 @@ async function findAffectedUserIdsByUnit(unitId: number) {
   return result.rows.map((row: { userId: number }) => row.userId);
 }
 
+async function findAffectedUserIdsByUnitNature(unitNatureId: number) {
+  const result = await pool.query(
+    `SELECT DISTINCT uop.user_id as "userId"
+     FROM user_org_positions uop
+     INNER JOIN org_positions p ON p.id = uop.position_id
+     INNER JOIN org_departments d ON d.id = p.department_id
+     INNER JOIN org_units un ON un.id = d.unit_id
+     WHERE un.unit_nature_id = $1`,
+    [unitNatureId],
+  );
+
+  return result.rows.map((row: { userId: number }) => row.userId);
+}
+
 async function findAffectedUserIdsByDepartment(departmentId: number) {
   const result = await pool.query(
     `SELECT DISTINCT uop.user_id as "userId"
@@ -166,13 +201,15 @@ function notifyUsersProfileUpdated(userIds: number[]) {
 
 export const getOrgStructure = async (_req: Request, res: Response) => {
   try {
-    const [unitsResult, departmentsResult, positionsResult] = await Promise.all([
+    const [unitNaturesResult, unitsResult, departmentsResult, positionsResult] = await Promise.all([
+      pool.query(`SELECT ${unitNatureReturningSql} FROM org_unit_natures ORDER BY sort_order ASC, id ASC`),
       pool.query(`SELECT ${unitReturningSql} FROM org_units ORDER BY sort_order ASC, id ASC`),
       pool.query(`SELECT ${departmentReturningSql} FROM org_departments ORDER BY sort_order ASC, id ASC`),
       pool.query(`SELECT ${positionReturningSql} FROM org_positions ORDER BY sort_order ASC, id ASC`),
     ]);
 
     res.json({
+      unitNatures: unitNaturesResult.rows,
       units: unitsResult.rows,
       departments: departmentsResult.rows,
       positions: positionsResult.rows,
@@ -183,14 +220,142 @@ export const getOrgStructure = async (_req: Request, res: Response) => {
   }
 };
 
-export const createUnit = async (req: Request, res: Response) => {
+export const createUnitNature = async (req: Request, res: Response) => {
   try {
     const name = normalizeName(req.body?.name);
     if (!name) {
-      return res.status(400).json({ message: '请输入单位名称' });
+      return res.status(400).json({ message: '请输入单位性质名称' });
     }
 
-    const result = await pool.query(`INSERT INTO org_units (name) VALUES ($1) RETURNING ${unitReturningSql}`, [name]);
+    const result = await pool.query(
+      `INSERT INTO org_unit_natures (name) VALUES ($1) RETURNING ${unitNatureReturningSql}`,
+      [name],
+    );
+
+    emitOrgStructureUpdated('unitNature');
+    res.status(201).json({ unitNature: result.rows[0] });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: '单位性质名称已存在' });
+    }
+    console.error('创建单位性质失败:', error);
+    res.status(500).json({ message: '创建单位性质失败' });
+  }
+};
+
+export const renameUnitNature = async (req: Request, res: Response) => {
+  try {
+    const unitNatureId = parseRequiredInt(req.params.unitNatureId);
+    const name = normalizeName(req.body?.name);
+
+    if (!unitNatureId) {
+      return res.status(400).json({ message: '无效单位性质' });
+    }
+    if (!name) {
+      return res.status(400).json({ message: '请输入单位性质名称' });
+    }
+
+    const result = await pool.query(
+      `UPDATE org_unit_natures
+       SET name = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2
+       RETURNING ${unitNatureReturningSql}`,
+      [name, unitNatureId],
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: '单位性质不存在' });
+    }
+
+    emitOrgStructureUpdated('unitNature');
+    res.json({ unitNature: result.rows[0] });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: '单位性质名称已存在' });
+    }
+    console.error('重命名单位性质失败:', error);
+    res.status(500).json({ message: '重命名单位性质失败' });
+  }
+};
+
+export const deleteUnitNature = async (req: Request, res: Response) => {
+  try {
+    const unitNatureId = parseRequiredInt(req.params.unitNatureId);
+    if (!unitNatureId) {
+      return res.status(400).json({ message: '无效单位性质' });
+    }
+
+    const affectedUserIds = await findAffectedUserIdsByUnitNature(unitNatureId);
+    const result = await pool.query('DELETE FROM org_unit_natures WHERE id = $1 RETURNING id', [unitNatureId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: '单位性质不存在' });
+    }
+
+    notifyUsersProfileUpdated(affectedUserIds);
+    emitOrgStructureUpdated('unitNature');
+    res.json({ message: '删除成功' });
+  } catch (error) {
+    console.error('删除单位性质失败:', error);
+    res.status(500).json({ message: '删除单位性质失败' });
+  }
+};
+
+export const activateUnitNaturesForOrg = async (req: Request, res: Response) => {
+  try {
+    const unitNatureIds = parsePositiveIntArray(req.body?.unitNatureIds);
+    if (unitNatureIds.length === 0) {
+      return res.status(400).json({ message: '请选择单位性质' });
+    }
+
+    const existingResult = await pool.query(
+      `SELECT ${unitNatureReturningSql}
+       FROM org_unit_natures
+       WHERE id = ANY($1::int[])
+       ORDER BY sort_order ASC, id ASC`,
+      [unitNatureIds],
+    );
+
+    if (existingResult.rows.length !== unitNatureIds.length) {
+      return res.status(400).json({ message: '存在无效的单位性质' });
+    }
+
+    const updatedResult = await pool.query(
+      `UPDATE org_unit_natures
+       SET org_enabled = TRUE, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ANY($1::int[])
+       RETURNING ${unitNatureReturningSql}`,
+      [unitNatureIds],
+    );
+
+    emitOrgStructureUpdated('unitNature');
+    res.json({ unitNatures: updatedResult.rows });
+  } catch (error) {
+    console.error('添加单位性质到单位管理失败:', error);
+    res.status(500).json({ message: '添加单位性质失败' });
+  }
+};
+
+export const createUnit = async (req: Request, res: Response) => {
+  try {
+    const name = normalizeName(req.body?.name);
+    const unitNatureId = parseRequiredInt(req.body?.unitNatureId);
+    if (!name) {
+      return res.status(400).json({ message: '请输入单位名称' });
+    }
+    if (!unitNatureId) {
+      return res.status(400).json({ message: '请选择单位性质' });
+    }
+
+    const unitNatureExists = await pool.query('SELECT id FROM org_unit_natures WHERE id = $1 LIMIT 1', [unitNatureId]);
+    if (unitNatureExists.rows.length === 0) {
+      return res.status(400).json({ message: '所选单位性质不存在' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO org_units (unit_nature_id, name) VALUES ($1, $2) RETURNING ${unitReturningSql}`,
+      [unitNatureId, name],
+    );
 
     emitOrgStructureUpdated('unit');
     res.status(201).json({ unit: result.rows[0] });
@@ -676,5 +841,48 @@ export const removePersonFromPosition = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('删除人员失败:', error);
     res.status(500).json({ message: '删除人员失败' });
+  }
+};
+
+export const movePersonToPosition = async (req: Request, res: Response) => {
+  try {
+    const userId = parseRequiredInt(req.params.userId);
+    const positionId = parseRequiredInt(req.body?.positionId);
+
+    if (!userId) {
+      return res.status(400).json({ message: '无效人员' });
+    }
+
+    if (!positionId) {
+      return res.status(400).json({ message: '请选择目标职位' });
+    }
+
+    const [userResult, positionResult] = await Promise.all([
+      pool.query('SELECT id FROM users WHERE id = $1 LIMIT 1', [userId]),
+      pool.query('SELECT id FROM org_positions WHERE id = $1 LIMIT 1', [positionId]),
+    ]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: '人员不存在' });
+    }
+
+    if (positionResult.rows.length === 0) {
+      return res.status(400).json({ message: '目标职位不存在' });
+    }
+
+    await pool.query(
+      `INSERT INTO user_org_positions (user_id, position_id)
+       VALUES ($1, $2)
+       ON CONFLICT (user_id)
+       DO UPDATE SET position_id = EXCLUDED.position_id, updated_at = CURRENT_TIMESTAMP`,
+      [userId, positionId],
+    );
+
+    emitUserProfileUpdated(userId);
+    emitUserDirectoryUpdated(userId);
+    res.json({ message: '移动成功' });
+  } catch (error) {
+    console.error('移动人员失败:', error);
+    res.status(500).json({ message: '移动人员失败' });
   }
 };

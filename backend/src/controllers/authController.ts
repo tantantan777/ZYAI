@@ -5,9 +5,10 @@ import { sendVerificationCode } from '../config/email';
 import { AuthRequest } from '../middleware/auth';
 import { emitUserDirectoryUpdated } from '../services/socketServer';
 import { getFeatureAccessInfo } from '../services/systemSettingsAccess';
+import { verificationCodeStore } from '../services/verificationCodeStore';
 
 const CHINESE_NAME_PATTERN = /^\p{Script=Han}{1,4}$/u;
-const PHONE_PATTERN = /^\+86(1[3-9]\d{9})$/;
+const PHONE_PATTERN = /^1[3-9]\d{9}$/;
 
 function generateCode(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
@@ -107,7 +108,7 @@ export const getRegistrationOrgStructure = async (_req: Request, res: Response) 
 
 export const sendCode = async (req: Request, res: Response) => {
   try {
-    const { email } = req.body;
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
 
     if (!email) {
       return res.status(400).json({ message: '请提供邮箱地址' });
@@ -116,36 +117,26 @@ export const sendCode = async (req: Request, res: Response) => {
     const codeExpiryTime = parseInt(process.env.CODE_EXPIRY_TIME || '300', 10);
     const codeCooldownTime = parseInt(process.env.CODE_COOLDOWN_TIME || '60', 10);
 
-    const [lastCodeResult, userResult] = await Promise.all([
-      pool.query('SELECT created_at FROM verification_codes WHERE email = $1 ORDER BY created_at DESC LIMIT 1', [email]),
-      pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]),
-    ]);
+    const userResult = await pool.query('SELECT id FROM users WHERE email = $1 LIMIT 1', [email]);
+    const remainingTime = await verificationCodeStore.getCooldownRemainingSeconds(email);
 
-    if (lastCodeResult.rows.length > 0) {
-      const lastCodeTime = new Date(lastCodeResult.rows[0].created_at);
-      const now = new Date();
-      const timeDiff = Math.floor((now.getTime() - lastCodeTime.getTime()) / 1000);
-      const remainingTime = codeCooldownTime - timeDiff;
-
-      if (remainingTime > 0) {
-        return res.status(429).json({
-          message: `请 ${remainingTime} 秒后再试`,
-          remainingTime,
-          isExistingUser: userResult.rows.length > 0,
-        });
-      }
+    if (remainingTime > 0) {
+      return res.status(429).json({
+        message: `请 ${remainingTime} 秒后再试`,
+        remainingTime,
+        isExistingUser: userResult.rows.length > 0,
+      });
     }
 
     const code = generateCode();
-    const expiresAt = new Date(Date.now() + codeExpiryTime * 1000);
+    await verificationCodeStore.saveCode(email, code, codeExpiryTime, codeCooldownTime);
 
-    await pool.query('INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)', [
-      email,
-      code,
-      expiresAt,
-    ]);
-
-    await sendVerificationCode(email, code);
+    try {
+      await sendVerificationCode(email, code);
+    } catch (error) {
+      await verificationCodeStore.clear(email).catch(() => undefined);
+      throw error;
+    }
 
     res.json({
       message: '验证码已发送到您的邮箱',
@@ -160,22 +151,18 @@ export const sendCode = async (req: Request, res: Response) => {
 
 export const login = async (req: Request, res: Response) => {
   try {
-    const { email, code, remember } = req.body;
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim() : '';
+    const code = typeof req.body?.code === 'string' ? req.body.code.trim() : '';
+    const { remember } = req.body;
 
     if (!email || !code) {
       return res.status(400).json({ message: '请提供邮箱和验证码' });
     }
 
-    const verificationResult = await pool.query(
-      'SELECT * FROM verification_codes WHERE email = $1 AND code = $2 AND used = FALSE AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1',
-      [email, code],
-    );
-
-    if (verificationResult.rows.length === 0) {
+    const verificationMatched = await verificationCodeStore.consumeCode(email, code);
+    if (!verificationMatched) {
       return res.status(400).json({ message: '验证码无效或已过期' });
     }
-
-    await pool.query('UPDATE verification_codes SET used = TRUE WHERE id = $1', [verificationResult.rows[0].id]);
 
     const userResult = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
 
@@ -196,7 +183,7 @@ export const login = async (req: Request, res: Response) => {
         return res.status(400).json({ message: '请选择性别' });
       }
       if (!phone) {
-        return res.status(400).json({ message: '手机号仅支持 +86 中国大陆号码' });
+        return res.status(400).json({ message: '请输入有效的手机号' });
       }
       if (!hireDate) {
         return res.status(400).json({ message: '请选择有效的入职时间' });

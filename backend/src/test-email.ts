@@ -1,5 +1,5 @@
 import { sendVerificationCode } from './config/email';
-import pool from './config/database';
+import { verificationCodeStore } from './services/verificationCodeStore';
 
 async function testSendCode() {
   try {
@@ -10,14 +10,10 @@ async function testSendCode() {
     console.log('收件邮箱:', testEmail);
     console.log('验证码:', testCode);
 
-    // 测试数据库插入
-    console.log('\n1. 测试数据库插入...');
-    const expiresAt = new Date(Date.now() + 300000); // 5分钟后过期
-    await pool.query(
-      'INSERT INTO verification_codes (email, code, expires_at) VALUES ($1, $2, $3)',
-      [testEmail, testCode, expiresAt]
-    );
-    console.log('✓ 数据库插入成功');
+    console.log('\n1. 测试 Redis 写入...');
+    await verificationCodeStore.initialize();
+    await verificationCodeStore.saveCode(testEmail, testCode, 300, 60);
+    console.log('✓ Redis 写入成功');
 
     // 测试邮件发送
     console.log('\n2. 测试邮件发送...');

@@ -1,27 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Avatar,
-  Button,
-  Card,
-  Col,
-  DatePicker,
-  Form,
-  Input,
-  Row,
-  Select,
-  Space,
-  Upload,
-  message,
-} from 'antd';
+import { Avatar, Button, Card, Col, DatePicker, Form, Input, Row, Select, Upload } from 'antd';
 import type { UploadFile } from 'antd';
-import { ReloadOutlined, SaveOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
-import dayjs, { Dayjs } from 'dayjs';
+import { SaveOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
+import dayjs, { type Dayjs } from 'dayjs';
 import api from '../utils/api';
 import {
   ensureRealtimeConnection,
   type OrgStructureUpdatedEvent,
   type UserProfileUpdatedEvent,
 } from '../services/realtime';
+import { feedback as message } from '../utils/feedback';
 import './Profile.css';
 
 interface OrgUnitItem {
@@ -64,9 +52,6 @@ type ProfileFormValues = {
   hireDate?: Dayjs;
   phone?: string;
   avatar?: string;
-  unitId?: number;
-  departmentId?: number;
-  positionId?: number;
 };
 
 function toDataUrl(file: File): Promise<string> {
@@ -84,13 +69,13 @@ function formatTenure(hireDate?: Dayjs): string {
   }
 
   const start = hireDate.startOf('day');
-  const now = dayjs().startOf('day');
+  const today = dayjs().startOf('day');
 
-  if (start.isAfter(now)) {
+  if (start.isAfter(today)) {
     return '0个月';
   }
 
-  const months = now.diff(start, 'month');
+  const months = today.diff(start, 'month');
   const years = Math.floor(months / 12);
   const remainingMonths = months % 12;
 
@@ -109,11 +94,9 @@ export default function Profile() {
   const [form] = Form.useForm<ProfileFormValues>();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-
   const [units, setUnits] = useState<OrgUnitItem[]>([]);
   const [departments, setDepartments] = useState<OrgDepartmentItem[]>([]);
   const [positions, setPositions] = useState<OrgPositionItem[]>([]);
-
   const [selectedUnitId, setSelectedUnitId] = useState<number>(0);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<number>(0);
   const [selectedPositionId, setSelectedPositionId] = useState<number>(0);
@@ -121,13 +104,17 @@ export default function Profile() {
   const avatarValue = Form.useWatch('avatar', form);
   const hireDateValue = Form.useWatch('hireDate', form);
 
-  const currentDepartments = useMemo(
-    () => departments.filter((item) => item.unitId === selectedUnitId),
-    [departments, selectedUnitId]
+  const currentUnitName = useMemo(
+    () => units.find((item) => item.id === selectedUnitId)?.name ?? '-',
+    [selectedUnitId, units],
   );
-  const currentPositions = useMemo(
-    () => positions.filter((item) => item.departmentId === selectedDepartmentId),
-    [positions, selectedDepartmentId]
+  const currentDepartmentName = useMemo(
+    () => departments.find((item) => item.id === selectedDepartmentId)?.name ?? '-',
+    [departments, selectedDepartmentId],
+  );
+  const currentPositionName = useMemo(
+    () => positions.find((item) => item.id === selectedPositionId)?.name ?? '-',
+    [positions, selectedPositionId],
   );
   const tenureText = useMemo(() => formatTenure(hireDateValue), [hireDateValue]);
 
@@ -148,8 +135,36 @@ export default function Profile() {
     } catch (error) {
       console.error('加载组织结构失败:', error);
       if (!silent) {
-        message.error('加载组织结构失败');
+        message.error('组织结构加载失败，请稍后重试');
       }
+    }
+  };
+
+  const loadAll = async () => {
+    setLoading(true);
+    try {
+      const [profileRes, orgRes] = await Promise.all([api.get('/user/profile'), api.get('/org/structure')]);
+      const user = profileRes.data.user as ProfileUser;
+
+      applyOrgStructure(orgRes.data);
+      setSelectedUnitId(user.unitId ?? 0);
+      setSelectedDepartmentId(user.departmentId ?? 0);
+      setSelectedPositionId(user.positionId ?? 0);
+
+      form.setFieldsValue({
+        userId: user.id,
+        email: user.email,
+        name: user.name ?? '',
+        gender: user.gender ?? undefined,
+        hireDate: user.hireDate ? dayjs(user.hireDate) : undefined,
+        phone: user.phone ?? '',
+        avatar: user.avatar ?? undefined,
+      });
+    } catch (error) {
+      console.error('加载个人资料失败:', error);
+      message.error('个人资料加载失败，请稍后重试');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -167,6 +182,7 @@ export default function Profile() {
       window.dispatchEvent(new Event('user-profile-updated'));
       void loadAll();
     };
+
     const handleOrgStructureUpdated = (_payload: OrgStructureUpdatedEvent) => {
       void loadOrgStructure(true);
     };
@@ -180,83 +196,6 @@ export default function Profile() {
     };
   }, []);
 
-  useEffect(() => {
-    const isValid = selectedUnitId === 0 || units.some((item) => item.id === selectedUnitId);
-    if (isValid) {
-      return;
-    }
-    setSelectedUnitId(0);
-    setSelectedDepartmentId(0);
-    setSelectedPositionId(0);
-  }, [selectedUnitId, units]);
-
-  useEffect(() => {
-    const isValid = currentDepartments.some((item) => item.id === selectedDepartmentId);
-    if (isValid) {
-      return;
-    }
-    setSelectedDepartmentId(currentDepartments[0]?.id ?? 0);
-  }, [currentDepartments, selectedDepartmentId]);
-
-  useEffect(() => {
-    const isValid = currentPositions.some((item) => item.id === selectedPositionId);
-    if (isValid) {
-      return;
-    }
-    setSelectedPositionId(currentPositions[0]?.id ?? 0);
-  }, [currentPositions, selectedPositionId]);
-
-  useEffect(() => {
-    form.setFieldValue('unitId', selectedUnitId || undefined);
-  }, [form, selectedUnitId]);
-
-  useEffect(() => {
-    form.setFieldValue('departmentId', selectedDepartmentId || undefined);
-  }, [form, selectedDepartmentId]);
-
-  useEffect(() => {
-    form.setFieldValue('positionId', selectedPositionId || undefined);
-  }, [form, selectedPositionId]);
-
-  const loadAll = async () => {
-    setLoading(true);
-    try {
-      const [profileRes, orgRes] = await Promise.all([
-        api.get('/user/profile'),
-        api.get('/org/structure'),
-      ]);
-
-      const user = profileRes.data.user as ProfileUser;
-      applyOrgStructure(orgRes.data);
-
-      const nextSelectedUnitId = user.unitId ?? 0;
-      const nextSelectedDepartmentId = user.departmentId ?? 0;
-      const nextSelectedPositionId = user.positionId ?? 0;
-
-      setSelectedUnitId(nextSelectedUnitId);
-      setSelectedDepartmentId(nextSelectedDepartmentId);
-      setSelectedPositionId(nextSelectedPositionId);
-
-      form.setFieldsValue({
-        userId: user.id,
-        email: user.email,
-        name: user.name ?? '',
-        gender: user.gender ?? undefined,
-        hireDate: user.hireDate ? dayjs(user.hireDate) : undefined,
-        phone: user.phone ?? '',
-        avatar: user.avatar ?? undefined,
-        unitId: nextSelectedUnitId || undefined,
-        departmentId: nextSelectedDepartmentId || undefined,
-        positionId: nextSelectedPositionId || undefined,
-      });
-    } catch (error) {
-      console.error('加载个人资料失败:', error);
-      message.error('加载个人资料失败');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSave = async () => {
     try {
       setSaving(true);
@@ -268,36 +207,23 @@ export default function Profile() {
         hireDate: values.hireDate ? values.hireDate.format('YYYY-MM-DD') : null,
         phone: values.phone,
         avatar: values.avatar,
-        positionId: values.positionId ?? null,
       });
 
-      message.success('保存成功');
+      message.success('个人资料已保存');
       window.dispatchEvent(new Event('user-profile-updated'));
       void loadAll();
     } catch (error: any) {
       if (error?.errorFields) {
         return;
       }
-      message.error(error.response?.data?.message || '保存失败');
+      message.error(error.response?.data?.message || '个人资料保存失败，请稍后重试');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleUnitChange = (value?: number) => {
-    setSelectedUnitId(value ?? 0);
-    setSelectedDepartmentId(0);
-    setSelectedPositionId(0);
-  };
-
-  const handleDepartmentChange = (value?: number) => {
-    setSelectedDepartmentId(value ?? 0);
-    setSelectedPositionId(0);
-  };
-
   const handleAvatarBeforeUpload = (file: File) => {
-    const isImage = file.type.startsWith('image/');
-    if (!isImage) {
+    if (!file.type.startsWith('image/')) {
       message.error('请上传图片文件');
       return Upload.LIST_IGNORE;
     }
@@ -316,12 +242,13 @@ export default function Profile() {
     if (!file) {
       return;
     }
+
     try {
       const dataUrl = await toDataUrl(file);
       form.setFieldValue('avatar', dataUrl);
     } catch (error) {
       console.error('读取头像失败:', error);
-      message.error('读取头像失败');
+      message.error('头像读取失败，请稍后重试');
     }
   };
 
@@ -334,14 +261,9 @@ export default function Profile() {
         bordered={false}
         title="个人中心"
         extra={
-          <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => void loadAll()} disabled={loading || saving}>
-              刷新
-            </Button>
-            <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>
-              保存
-            </Button>
-          </Space>
+          <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>
+            保存
+          </Button>
         }
         loading={loading}
       >
@@ -357,9 +279,6 @@ export default function Profile() {
             >
               <Button icon={<UploadOutlined />}>更换头像</Button>
             </Upload>
-            <Button onClick={() => form.setFieldValue('avatar', undefined)} disabled={!avatarSrc}>
-              移除头像
-            </Button>
           </div>
         </div>
 
@@ -417,39 +336,19 @@ export default function Profile() {
               </Form.Item>
             </Col>
             <Col xs={24} lg={12}>
-              <Form.Item label="单位" name="unitId">
-                <Select
-                  placeholder="请选择单位"
-                  options={units.map((item) => ({ label: item.name, value: item.id }))}
-                  value={selectedUnitId || undefined}
-                  onChange={handleUnitChange}
-                  allowClear
-                />
+              <Form.Item label="单位">
+                <Input value={currentUnitName} disabled />
               </Form.Item>
             </Col>
 
             <Col xs={24} lg={12}>
-              <Form.Item label="部门" name="departmentId">
-                <Select
-                  placeholder="请选择部门"
-                  options={currentDepartments.map((item) => ({ label: item.name, value: item.id }))}
-                  value={selectedDepartmentId || undefined}
-                  onChange={handleDepartmentChange}
-                  disabled={!selectedUnitId}
-                  allowClear
-                />
+              <Form.Item label="部门">
+                <Input value={currentDepartmentName} disabled />
               </Form.Item>
             </Col>
             <Col xs={24} lg={12}>
-              <Form.Item label="职位" name="positionId">
-                <Select
-                  placeholder="请选择职位"
-                  options={currentPositions.map((item) => ({ label: item.name, value: item.id }))}
-                  value={selectedPositionId || undefined}
-                  onChange={(value) => setSelectedPositionId(value ?? 0)}
-                  disabled={!selectedDepartmentId}
-                  allowClear
-                />
+              <Form.Item label="职位">
+                <Input value={currentPositionName} disabled />
               </Form.Item>
             </Col>
 

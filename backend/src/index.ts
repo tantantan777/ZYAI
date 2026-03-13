@@ -13,6 +13,7 @@ import { createOrgStructureTables } from './models/orgStructure';
 import { expressCorsOptions } from './config/cors';
 import { presenceService } from './services/presenceService';
 import { attachSocketServer } from './services/socketServer';
+import { verificationCodeStore } from './services/verificationCodeStore';
 
 dotenv.config();
 
@@ -30,7 +31,7 @@ app.use('/api/org', orgRoutes);
 app.use('/api/user', userRoutes);
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', message: 'ZJZAI Backend is running' });
+  res.json({ status: 'ok', message: '万物方圆智能化 Backend is running' });
 });
 
 const initDatabase = async () => {
@@ -51,6 +52,7 @@ attachSocketServer(server);
 
 const bootstrap = async () => {
   await initDatabase();
+  await verificationCodeStore.initialize();
   await presenceService.initialize();
 
   server.listen(PORT, () => {
