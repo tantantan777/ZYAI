@@ -1,4 +1,4 @@
-import { EventEmitter } from 'events';
+﻿import { EventEmitter } from 'events';
 import { createClient, type RedisClientType } from 'redis';
 import pool from '../config/database';
 
@@ -53,7 +53,7 @@ class PresenceService {
     this.redisEnabled = Boolean(process.env.REDIS_URL?.trim());
 
     if (!this.redisEnabled) {
-      console.log('未配置 REDIS_URL，presence 使用内存模式');
+      console.log('鏈厤缃?REDIS_URL锛宲resence 浣跨敤鍐呭瓨妯″紡');
       this.startRefreshLoop();
       return;
     }
@@ -73,7 +73,7 @@ class PresenceService {
     });
 
     this.redisClient.on('error', (error) => {
-      this.handleRedisUnavailable(error, 'Redis 连接异常，presence 已回退到内存模式:');
+      this.handleRedisUnavailable(error, 'Redis 杩炴帴寮傚父锛宲resence 宸插洖閫€鍒板唴瀛樻ā寮?');
       this.scheduleReconnect();
     });
 
@@ -105,7 +105,7 @@ class PresenceService {
       .connect()
       .then(() => undefined)
       .catch((error) => {
-        this.handleRedisUnavailable(error, 'Redis 初始化失败，presence 已回退到内存模式:');
+        this.handleRedisUnavailable(error, 'Redis 鍒濆鍖栧け璐ワ紝presence 宸插洖閫€鍒板唴瀛樻ā寮?');
         this.scheduleReconnect();
       })
       .finally(() => {
@@ -256,7 +256,7 @@ class PresenceService {
       }
       return userIds;
     } catch (error) {
-      console.error('读取在线用户失败，已回退到当前实例内存数据:', error);
+      console.error('璇诲彇鍦ㄧ嚎鐢ㄦ埛澶辫触锛屽凡鍥為€€鍒板綋鍓嶅疄渚嬪唴瀛樻暟鎹?', error);
       return new Set(this.sessions.keys());
     }
   }
@@ -295,7 +295,7 @@ class PresenceService {
         EX: PRESENCE_TTL_SECONDS,
       });
     } catch (error) {
-      console.error('写入 Redis presence 失败:', error);
+      console.error('鍐欏叆 Redis presence 澶辫触:', error);
     }
   }
 
@@ -307,7 +307,7 @@ class PresenceService {
     try {
       await this.redisClient.del(`${PRESENCE_KEY_PREFIX}${userId}`);
     } catch (error) {
-      console.error('清理 Redis presence 失败:', error);
+      console.error('娓呯悊 Redis presence 澶辫触:', error);
     }
   }
 
@@ -387,9 +387,11 @@ class PresenceService {
         this.lastActivityPersistedAt.set(userId, now);
       }
     } catch (error) {
-      console.error('持久化用户在线时间失败:', error);
+      console.error('鎸佷箙鍖栫敤鎴峰湪绾挎椂闂村け璐?', error);
     }
   }
 }
 
 export const presenceService = new PresenceService();
+
+

@@ -10,3 +10,38 @@
   padding: 16px 16px 24px;
 }
 
+.dashboard-section-card {
+  margin-bottom: 16px;
+}
+
+.dashboard-status-card {
+  height: 100%;
+  border-radius: 12px;
+}
+
+.dashboard-status-card .ant-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 84px;
+  padding: 16px;
+}
+
+.dashboard-status-card__tag {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.dashboard-status-card__tag .ant-tag {
+  margin-inline-end: 0;
+  white-space: normal;
+}
+
+.dashboard-section-hint {
+  margin-top: 12px;
+  color: #8c8c8c;
+  font-size: 12px;
+  line-height: 1.5;
+}

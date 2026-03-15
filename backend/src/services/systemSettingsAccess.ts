@@ -1,74 +1,61 @@
 import pool from '../config/database';
 
 export type FeatureAccessInfo = {
+  isSystemAdmin: boolean;
+  unitId: number | null;
+  departmentId: number | null;
+  positionId: number | null;
   dashboardVisible: boolean;
   aiChatVisible: boolean;
   projectsVisible: boolean;
+  projectCreateAllowed: boolean;
+  projectEditAllowed: boolean;
+  projectDeleteAllowed: boolean;
+  projectUploadAllowed: boolean;
   userQueryVisible: boolean;
   systemSettingsVisible: boolean;
 };
 
 type FeatureAccessRow = {
-  user_dashboard_visible: boolean;
-  unit_dashboard_visible: boolean | null;
-  department_dashboard_visible: boolean | null;
-  position_dashboard_visible: boolean | null;
-  user_ai_chat_visible: boolean;
-  unit_ai_chat_visible: boolean | null;
-  department_ai_chat_visible: boolean | null;
-  position_ai_chat_visible: boolean | null;
-  user_projects_visible: boolean;
-  unit_projects_visible: boolean | null;
-  department_projects_visible: boolean | null;
-  position_projects_visible: boolean | null;
-  user_user_query_visible: boolean;
-  unit_user_query_visible: boolean | null;
-  department_user_query_visible: boolean | null;
-  position_user_query_visible: boolean | null;
-  user_system_settings_visible: boolean;
-  unit_system_settings_visible: boolean | null;
-  department_system_settings_visible: boolean | null;
-  position_system_settings_visible: boolean | null;
+  is_system_admin: boolean;
+  unit_id: number | null;
+  department_id: number | null;
+  position_id: number | null;
+  department_project_management_enabled: boolean;
+  project_can_view: boolean | null;
+  project_can_create: boolean | null;
+  project_can_edit: boolean | null;
+  project_can_delete: boolean | null;
+  project_can_upload: boolean | null;
 };
 
-function resolveVisibility(
-  userVisible: boolean,
-  unitVisible: boolean | null,
-  departmentVisible: boolean | null,
-  positionVisible: boolean | null,
-) {
-  return userVisible !== false && unitVisible !== false && departmentVisible !== false && positionVisible !== false;
-}
-
 export const getFeatureAccessInfo = async (userId: number): Promise<FeatureAccessInfo | null> => {
-  const result = await pool.query(
+  const result = await pool.query<FeatureAccessRow>(
     `SELECT
-       COALESCE(u.dashboard_visible, TRUE) as user_dashboard_visible,
-       un.dashboard_visible as unit_dashboard_visible,
-       d.dashboard_visible as department_dashboard_visible,
-       p.dashboard_visible as position_dashboard_visible,
-       COALESCE(u.ai_chat_visible, TRUE) as user_ai_chat_visible,
-       un.ai_chat_visible as unit_ai_chat_visible,
-       d.ai_chat_visible as department_ai_chat_visible,
-       p.ai_chat_visible as position_ai_chat_visible,
-       COALESCE(u.projects_visible, TRUE) as user_projects_visible,
-       un.projects_visible as unit_projects_visible,
-       d.projects_visible as department_projects_visible,
-       p.projects_visible as position_projects_visible,
-       COALESCE(u.user_query_visible, TRUE) as user_user_query_visible,
-       un.user_query_visible as unit_user_query_visible,
-       d.user_query_visible as department_user_query_visible,
-       p.user_query_visible as position_user_query_visible,
-       COALESCE(u.system_settings_visible, TRUE) as user_system_settings_visible,
-       un.system_settings_visible as unit_system_settings_visible,
-       d.system_settings_visible as department_system_settings_visible,
-       p.system_settings_visible as position_system_settings_visible
+       COALESCE(u.is_system_admin, FALSE) as is_system_admin,
+       un.id as unit_id,
+       d.id as department_id,
+       p.id as position_id,
+       CASE WHEN dbd.business_domain_id IS NOT NULL THEN TRUE ELSE FALSE END as department_project_management_enabled,
+       pbp.can_view as project_can_view,
+       pbp.can_create as project_can_create,
+       pbp.can_edit as project_can_edit,
+       pbp.can_delete as project_can_delete,
+       pbp.can_upload as project_can_upload
      FROM users u
      LEFT JOIN user_org_positions uop ON uop.user_id = u.id
      LEFT JOIN org_positions p ON p.id = uop.position_id
      LEFT JOIN org_departments d ON d.id = p.department_id
      LEFT JOIN org_units un ON un.id = d.unit_id
-     WHERE u.id = $1`,
+     LEFT JOIN business_domains bd ON bd.code = 'project_management'
+     LEFT JOIN department_business_domains dbd
+       ON dbd.department_id = d.id
+      AND dbd.business_domain_id = bd.id
+     LEFT JOIN position_business_permissions pbp
+       ON pbp.position_id = p.id
+      AND pbp.business_domain_id = bd.id
+     WHERE u.id = $1
+     LIMIT 1`,
     [userId],
   );
 
@@ -76,39 +63,42 @@ export const getFeatureAccessInfo = async (userId: number): Promise<FeatureAcces
     return null;
   }
 
-  const row = result.rows[0] as FeatureAccessRow;
+  const row = result.rows[0];
+
+  if (row.is_system_admin) {
+    return {
+      isSystemAdmin: true,
+      unitId: row.unit_id,
+      departmentId: row.department_id,
+      positionId: row.position_id,
+      dashboardVisible: true,
+      aiChatVisible: true,
+      projectsVisible: true,
+      projectCreateAllowed: true,
+      projectEditAllowed: true,
+      projectDeleteAllowed: true,
+      projectUploadAllowed: true,
+      userQueryVisible: true,
+      systemSettingsVisible: true,
+    };
+  }
+
+  const projectDomainEnabled = row.department_project_management_enabled === true;
 
   return {
-    dashboardVisible: resolveVisibility(
-      row.user_dashboard_visible,
-      row.unit_dashboard_visible,
-      row.department_dashboard_visible,
-      row.position_dashboard_visible,
-    ),
-    aiChatVisible: resolveVisibility(
-      row.user_ai_chat_visible,
-      row.unit_ai_chat_visible,
-      row.department_ai_chat_visible,
-      row.position_ai_chat_visible,
-    ),
-    projectsVisible: resolveVisibility(
-      row.user_projects_visible,
-      row.unit_projects_visible,
-      row.department_projects_visible,
-      row.position_projects_visible,
-    ),
-    userQueryVisible: resolveVisibility(
-      row.user_user_query_visible,
-      row.unit_user_query_visible,
-      row.department_user_query_visible,
-      row.position_user_query_visible,
-    ),
-    systemSettingsVisible: resolveVisibility(
-      row.user_system_settings_visible,
-      row.unit_system_settings_visible,
-      row.department_system_settings_visible,
-      row.position_system_settings_visible,
-    ),
+    isSystemAdmin: false,
+    unitId: row.unit_id,
+    departmentId: row.department_id,
+    positionId: row.position_id,
+    dashboardVisible: true,
+    aiChatVisible: false,
+    projectsVisible: true,
+    projectCreateAllowed: projectDomainEnabled && row.project_can_create === true,
+    projectEditAllowed: projectDomainEnabled && row.project_can_edit === true,
+    projectDeleteAllowed: projectDomainEnabled && row.project_can_delete === true,
+    projectUploadAllowed: projectDomainEnabled && row.project_can_upload === true,
+    userQueryVisible: true,
+    systemSettingsVisible: false,
   };
 };
 
@@ -127,6 +117,21 @@ export const getAIChatVisibility = async (userId: number): Promise<boolean> => {
 export const getProjectsVisibility = async (userId: number): Promise<boolean> => {
   const accessInfo = await getFeatureAccessInfo(userId);
   return accessInfo?.projectsVisible ?? false;
+};
+
+export const getProjectCreateAccess = async (userId: number): Promise<boolean> => {
+  const accessInfo = await getFeatureAccessInfo(userId);
+  return accessInfo?.projectCreateAllowed ?? false;
+};
+
+export const getProjectEditAccess = async (userId: number): Promise<boolean> => {
+  const accessInfo = await getFeatureAccessInfo(userId);
+  return accessInfo?.projectEditAllowed ?? false;
+};
+
+export const getProjectDeleteAccess = async (userId: number): Promise<boolean> => {
+  const accessInfo = await getFeatureAccessInfo(userId);
+  return accessInfo?.projectDeleteAllowed ?? false;
 };
 
 export const getUserQueryVisibility = async (userId: number): Promise<boolean> => {

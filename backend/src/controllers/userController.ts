@@ -1,4 +1,4 @@
-import { Request, Response } from 'express';
+﻿import { Request, Response } from 'express';
 import pool from '../config/database';
 import { presenceService } from '../services/presenceService';
 import { emitUserDirectoryUpdated, emitUserProfileUpdated } from '../services/socketServer';
@@ -10,7 +10,7 @@ function normalizeOptionalString(value: unknown): string | null {
   }
 
   const trimmed = value.trim();
-  return trimmed ? trimmed : null;
+  return trimmed || null;
 }
 
 function toISODate(value: unknown): string | null {
@@ -67,6 +67,7 @@ export const getProfile = async (req: Request, res: Response) => {
         u.hire_date::text as hire_date,
         u.avatar,
         u.phone,
+        u.is_system_admin,
         u.created_at,
         u.updated_at,
         u.last_login,
@@ -102,9 +103,13 @@ export const getProfile = async (req: Request, res: Response) => {
         createdAt: row.created_at,
         updatedAt: row.updated_at,
         lastLogin: row.last_login,
+        isSystemAdmin: row.is_system_admin === true,
         dashboardVisible: accessInfo?.dashboardVisible ?? false,
         aiChatVisible: accessInfo?.aiChatVisible ?? false,
         projectsVisible: accessInfo?.projectsVisible ?? false,
+        projectCreateAllowed: accessInfo?.projectCreateAllowed ?? false,
+        projectEditAllowed: accessInfo?.projectEditAllowed ?? false,
+        projectDeleteAllowed: accessInfo?.projectDeleteAllowed ?? false,
         userQueryVisible: accessInfo?.userQueryVisible ?? false,
         systemSettingsVisible: accessInfo?.systemSettingsVisible ?? false,
         unitId: row.unit_id ?? null,
@@ -198,8 +203,10 @@ export const listUsers = async (_req: Request, res: Response) => {
         u.id,
         u.email,
         u.name,
+        u.avatar,
         u.gender,
         u.phone,
+        u.is_system_admin,
         u.hire_date::text as hire_date,
         u.created_at::text as created_at,
         u.last_login::text as last_login,
@@ -220,8 +227,10 @@ export const listUsers = async (_req: Request, res: Response) => {
         id: row.id,
         email: row.email,
         name: row.name ?? null,
+        avatar: row.avatar ?? null,
         gender: row.gender ?? null,
         phone: row.phone ?? null,
+        isSystemAdmin: row.is_system_admin === true,
         hireDate: row.hire_date ?? null,
         createdAt: row.created_at,
         lastLogin: row.last_login ?? null,

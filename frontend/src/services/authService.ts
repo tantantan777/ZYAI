@@ -38,9 +38,13 @@ export interface LoginResponse {
   user: {
     id: number;
     email: string;
+    isSystemAdmin?: boolean;
     dashboardVisible?: boolean;
     aiChatVisible?: boolean;
     projectsVisible?: boolean;
+    projectCreateAllowed?: boolean;
+    projectEditAllowed?: boolean;
+    projectDeleteAllowed?: boolean;
     userQueryVisible?: boolean;
     systemSettingsVisible?: boolean;
   };
@@ -53,9 +57,13 @@ export interface VerifyResponse {
     email: string;
     created_at: string;
     last_login: string;
+    isSystemAdmin?: boolean;
     dashboardVisible?: boolean;
     aiChatVisible?: boolean;
     projectsVisible?: boolean;
+    projectCreateAllowed?: boolean;
+    projectEditAllowed?: boolean;
+    projectDeleteAllowed?: boolean;
     userQueryVisible?: boolean;
     systemSettingsVisible?: boolean;
   };

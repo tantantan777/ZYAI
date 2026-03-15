@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Card, Input, Select, Table, Tag } from 'antd';
+import { Avatar, Card, Input, Select, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
+import { UserOutlined } from '@ant-design/icons';
 import api from '../utils/api';
 import {
   ensureRealtimeConnection,
@@ -32,6 +33,7 @@ interface RegisteredUserItem {
   id: number;
   email: string;
   name: string | null;
+  avatar: string | null;
   gender: 'male' | 'female' | 'unknown' | null;
   phone: string | null;
   unitName: string | null;
@@ -173,28 +175,44 @@ export default function UserDirectory() {
 
   const filteredUsers = useMemo(() => {
     const keyword = userSearchKeyword.trim().toLowerCase();
-
-    return users.filter((item) => {
-      if (userFilterUnitName && item.unitName !== userFilterUnitName) {
-        return false;
-      }
-
-      if (userFilterDepartmentName && item.departmentName !== userFilterDepartmentName) {
-        return false;
-      }
-
-      if (userFilterPositionName && item.positionName !== userFilterPositionName) {
-        return false;
-      }
-
-      if (!keyword) {
-        return true;
-      }
-
-      return [item.name, item.unitName, item.departmentName, item.positionName]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(keyword));
+    const collator = new Intl.Collator('zh-CN-u-co-pinyin', {
+      sensitivity: 'base',
+      numeric: true,
     });
+
+    return users
+      .filter((item) => {
+        if (userFilterUnitName && item.unitName !== userFilterUnitName) {
+          return false;
+        }
+
+        if (userFilterDepartmentName && item.departmentName !== userFilterDepartmentName) {
+          return false;
+        }
+
+        if (userFilterPositionName && item.positionName !== userFilterPositionName) {
+          return false;
+        }
+
+        if (!keyword) {
+          return true;
+        }
+
+        return [item.name, item.unitName, item.departmentName, item.positionName]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(keyword));
+      })
+      .sort((left, right) => {
+        const leftName = left.name?.trim() || left.email;
+        const rightName = right.name?.trim() || right.email;
+        const byName = collator.compare(leftName, rightName);
+
+        if (byName !== 0) {
+          return byName;
+        }
+
+        return left.id - right.id;
+      });
   }, [userFilterDepartmentName, userFilterPositionName, userFilterUnitName, userSearchKeyword, users]);
 
   useEffect(() => {
@@ -236,7 +254,13 @@ export default function UserDirectory() {
   }, []);
 
   const columns: TableProps<RegisteredUserItem>['columns'] = [
-    { title: 'ID', dataIndex: 'id', width: 60, align: 'center' },
+    {
+      title: '头像',
+      dataIndex: 'avatar',
+      width: 72,
+      align: 'center',
+      render: (value, record) => <Avatar src={value || undefined} icon={<UserOutlined />} alt={record.name || record.email} />,
+    },
     {
       title: '姓名',
       dataIndex: 'name',

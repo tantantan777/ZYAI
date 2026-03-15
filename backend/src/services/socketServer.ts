@@ -9,7 +9,13 @@ type SocketUserData = {
   email: string;
 };
 
-type OrgStructureEntityType = 'unitNature' | 'unit' | 'department' | 'position';
+type OrgStructureEntityType =
+  | 'unitNature'
+  | 'projectType'
+  | 'constructionNature'
+  | 'unit'
+  | 'department'
+  | 'position';
 
 let ioInstance: Server | null = null;
 

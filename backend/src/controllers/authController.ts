@@ -79,9 +79,13 @@ async function loadFeatureAccessInfo(userId: number) {
   const accessInfo = await getFeatureAccessInfo(userId);
 
   return {
+    isSystemAdmin: accessInfo?.isSystemAdmin ?? false,
     dashboardVisible: accessInfo?.dashboardVisible ?? false,
     aiChatVisible: accessInfo?.aiChatVisible ?? false,
     projectsVisible: accessInfo?.projectsVisible ?? false,
+    projectCreateAllowed: accessInfo?.projectCreateAllowed ?? false,
+    projectEditAllowed: accessInfo?.projectEditAllowed ?? false,
+    projectDeleteAllowed: accessInfo?.projectDeleteAllowed ?? false,
     userQueryVisible: accessInfo?.userQueryVisible ?? false,
     systemSettingsVisible: accessInfo?.systemSettingsVisible ?? false,
   };
@@ -101,7 +105,7 @@ export const getRegistrationOrgStructure = async (_req: Request, res: Response) 
       positions: positionsResult.rows,
     });
   } catch (error) {
-    console.error('获取登录页组织结构失败:', error);
+    console.error('获取注册组织结构失败:', error);
     res.status(500).json({ message: '获取组织结构失败' });
   }
 };
@@ -197,6 +201,11 @@ export const login = async (req: Request, res: Response) => {
         return res.status(400).json({ message: '所选职位不存在' });
       }
 
+      const adminCountResult = await pool.query<{ count: string }>(
+        'SELECT COUNT(*)::text as count FROM users WHERE is_system_admin = TRUE',
+      );
+      const grantSystemAdmin = Number(adminCountResult.rows[0]?.count ?? '0') === 0;
+
       const insertedUser = await pool.query(
         `INSERT INTO users (
            email,
@@ -204,14 +213,15 @@ export const login = async (req: Request, res: Response) => {
            gender,
            phone,
            hire_date,
+           is_system_admin,
            system_settings_visible,
            last_login,
            last_seen_at,
            last_active_at
          )
-         VALUES ($1, $2, $3, $4, $5, FALSE, NOW(), NOW(), NOW())
+         VALUES ($1, $2, $3, $4, $5, $6, FALSE, NOW(), NOW(), NOW())
          RETURNING *`,
-        [email, name, gender, phone, hireDate],
+        [email, name, gender, phone, hireDate, grantSystemAdmin],
       );
 
       user = insertedUser.rows[0];

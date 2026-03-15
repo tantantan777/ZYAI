@@ -24,12 +24,16 @@ type LayoutUser = {
   avatar?: string | null;
   phone?: string | null;
   createdAt?: string;
+  isSystemAdmin?: boolean;
   unitName?: string | null;
   departmentName?: string | null;
   positionName?: string | null;
   dashboardVisible?: boolean;
   aiChatVisible?: boolean;
   projectsVisible?: boolean;
+  projectCreateAllowed?: boolean;
+  projectEditAllowed?: boolean;
+  projectDeleteAllowed?: boolean;
   userQueryVisible?: boolean;
   systemSettingsVisible?: boolean;
 };

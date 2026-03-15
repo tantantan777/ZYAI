@@ -20,7 +20,7 @@ export type UserDirectoryUpdatedEvent = {
 };
 
 export type OrgStructureUpdatedEvent = {
-  entityType: 'unitNature' | 'unit' | 'department' | 'position';
+  entityType: 'unitNature' | 'projectType' | 'constructionNature' | 'unit' | 'department' | 'position';
 };
 
 const SOCKET_SERVER_URL = getBackendOrigin();

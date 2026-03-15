@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import { Avatar, Button, Card, Col, DatePicker, Form, Input, Row, Select, Upload } from 'antd';
 import type { UploadFile } from 'antd';
 import { SaveOutlined, UploadOutlined, UserOutlined } from '@ant-design/icons';
 import dayjs, { type Dayjs } from 'dayjs';
 import api from '../utils/api';
+import { logClientAuditAsync } from '../utils/audit';
 import {
   ensureRealtimeConnection,
   type OrgStructureUpdatedEvent,
@@ -210,6 +211,11 @@ export default function Profile() {
       });
 
       message.success('个人资料已保存');
+      logClientAuditAsync({
+        actionType: 'edit',
+        targetType: '个人资料',
+        targetName: values.name || '个人中心',
+      });
       window.dispatchEvent(new Event('user-profile-updated'));
       void loadAll();
     } catch (error: any) {
@@ -296,7 +302,7 @@ export default function Profile() {
             </Col>
 
             <Col xs={24} lg={12}>
-              <Form.Item label="姓名" name="name" rules={[{ max: 50, message: '最多 50 个字符' }]}>
+              <Form.Item label="姓名" name="name" rules={[{ max: 50, message: '最多50个字符' }]}>
                 <Input placeholder="请输入姓名" />
               </Form.Item>
             </Col>
@@ -331,7 +337,7 @@ export default function Profile() {
             </Col>
 
             <Col xs={24} lg={12}>
-              <Form.Item label="手机号" name="phone" rules={[{ max: 30, message: '最多 30 个字符' }]}>
+              <Form.Item label="手机号" name="phone" rules={[{ max: 30, message: '最多30个字符' }]}>
                 <Input placeholder="请输入手机号" />
               </Form.Item>
             </Col>
@@ -361,3 +367,4 @@ export default function Profile() {
     </div>
   );
 }
+

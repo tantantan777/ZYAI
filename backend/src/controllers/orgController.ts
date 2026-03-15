@@ -6,11 +6,17 @@ type VisibilitySettings = {
   dashboardVisible: boolean;
   aiChatVisible: boolean;
   projectsVisible: boolean;
+  projectCreateAllowed: boolean;
+  projectEditAllowed: boolean;
+  projectDeleteAllowed: boolean;
   userQueryVisible: boolean;
   systemSettingsVisible: boolean;
 };
 
-const unitNatureReturningSql = 'id, name, org_enabled as "orgEnabled"';
+const basePlatformConfigReturningSql = 'id, name';
+const unitNatureReturningSql = `${basePlatformConfigReturningSql}, org_enabled as "orgEnabled"`;
+const projectTypeReturningSql = basePlatformConfigReturningSql;
+const constructionNatureReturningSql = basePlatformConfigReturningSql;
 const visibilitySelectSql = `
   dashboard_visible as "dashboardVisible",
   ai_chat_visible as "aiChatVisible",
@@ -23,14 +29,27 @@ const userVisibilitySelectSql = `
   u.dashboard_visible as "dashboardVisible",
   u.ai_chat_visible as "aiChatVisible",
   u.projects_visible as "projectsVisible",
+  u.project_create_allowed as "projectCreateAllowed",
+  u.project_edit_allowed as "projectEditAllowed",
+  u.project_delete_allowed as "projectDeleteAllowed",
   u.user_query_visible as "userQueryVisible",
-  u.system_settings_visible as "systemSettingsVisible"
+  u.system_settings_visible as "systemSettingsVisible",
+  u.is_system_admin as "isSystemAdmin"
 `;
 
 const unitReturningSql = `id, unit_nature_id as "unitNatureId", name, ${visibilitySelectSql}`;
 const departmentReturningSql = `id, unit_id as "unitId", name, ${visibilitySelectSql}`;
 const positionReturningSql = `id, department_id as "departmentId", name, ${visibilitySelectSql}`;
-const personReturningSql = `id, email, name, phone, ${visibilitySelectSql}`;
+const personReturningSql = `id, email, name, phone,
+  dashboard_visible as "dashboardVisible",
+  ai_chat_visible as "aiChatVisible",
+  projects_visible as "projectsVisible",
+  project_create_allowed as "projectCreateAllowed",
+  project_edit_allowed as "projectEditAllowed",
+  project_delete_allowed as "projectDeleteAllowed",
+  user_query_visible as "userQueryVisible",
+  system_settings_visible as "systemSettingsVisible",
+  is_system_admin as "isSystemAdmin"`;
 const personSelectSql = `u.id, u.email, u.name, u.phone, ${userVisibilitySelectSql}`;
 
 function parseRequiredInt(value: unknown): number | null {
@@ -71,6 +90,26 @@ function parsePositiveIntArray(value: unknown): number[] {
   return result;
 }
 
+type PlatformConfigTableName = 'project_types' | 'construction_natures';
+
+async function createPlatformConfigItem(tableName: PlatformConfigTableName, name: string) {
+  return pool.query(`INSERT INTO ${tableName} (name) VALUES ($1) RETURNING ${basePlatformConfigReturningSql}`, [name]);
+}
+
+async function renamePlatformConfigItem(tableName: PlatformConfigTableName, id: number, name: string) {
+  return pool.query(
+    `UPDATE ${tableName}
+     SET name = $1, updated_at = CURRENT_TIMESTAMP
+     WHERE id = $2
+     RETURNING ${basePlatformConfigReturningSql}`,
+    [name, id],
+  );
+}
+
+async function deletePlatformConfigItem(tableName: PlatformConfigTableName, id: number) {
+  return pool.query(`DELETE FROM ${tableName} WHERE id = $1 RETURNING id`, [id]);
+}
+
 function parseVisibilitySettings(value: unknown): VisibilitySettings | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -80,6 +119,9 @@ function parseVisibilitySettings(value: unknown): VisibilitySettings | null {
   const dashboardVisible = parseRequiredBoolean(body.dashboardVisible);
   const aiChatVisible = parseRequiredBoolean(body.aiChatVisible);
   const projectsVisible = parseRequiredBoolean(body.projectsVisible);
+  const projectCreateAllowed = parseRequiredBoolean(body.projectCreateAllowed);
+  const projectEditAllowed = parseRequiredBoolean(body.projectEditAllowed);
+  const projectDeleteAllowed = parseRequiredBoolean(body.projectDeleteAllowed);
   const userQueryVisible = parseRequiredBoolean(body.userQueryVisible);
   const systemSettingsVisible = parseRequiredBoolean(body.systemSettingsVisible);
 
@@ -87,6 +129,9 @@ function parseVisibilitySettings(value: unknown): VisibilitySettings | null {
     dashboardVisible === null ||
     aiChatVisible === null ||
     projectsVisible === null ||
+    projectCreateAllowed === null ||
+    projectEditAllowed === null ||
+    projectDeleteAllowed === null ||
     userQueryVisible === null ||
     systemSettingsVisible === null
   ) {
@@ -97,6 +142,9 @@ function parseVisibilitySettings(value: unknown): VisibilitySettings | null {
     dashboardVisible,
     aiChatVisible,
     projectsVisible,
+    projectCreateAllowed,
+    projectEditAllowed,
+    projectDeleteAllowed,
     userQueryVisible,
     systemSettingsVisible,
   };
@@ -107,6 +155,9 @@ function getVisibilityValues(settings: VisibilitySettings) {
     settings.dashboardVisible,
     settings.aiChatVisible,
     settings.projectsVisible,
+    settings.projectCreateAllowed,
+    settings.projectEditAllowed,
+    settings.projectDeleteAllowed,
     settings.userQueryVisible,
     settings.systemSettingsVisible,
   ];
@@ -117,6 +168,9 @@ function normalizeVisibilitySettings(row: Partial<VisibilitySettings>): Visibili
     dashboardVisible: row.dashboardVisible !== false,
     aiChatVisible: row.aiChatVisible !== false,
     projectsVisible: row.projectsVisible !== false,
+    projectCreateAllowed: row.projectCreateAllowed !== false,
+    projectEditAllowed: row.projectEditAllowed !== false,
+    projectDeleteAllowed: row.projectDeleteAllowed !== false,
     userQueryVisible: row.userQueryVisible !== false,
     systemSettingsVisible: row.systemSettingsVisible !== false,
   };
@@ -128,6 +182,7 @@ function mapPersonRow(
     email: string;
     name: string | null;
     phone: string | null;
+    isSystemAdmin?: boolean;
   } & Partial<VisibilitySettings>,
   positionId: number | null,
 ) {
@@ -137,6 +192,7 @@ function mapPersonRow(
     name: row.name || row.email,
     email: row.email,
     phone: row.phone || undefined,
+    isSystemAdmin: row.isSystemAdmin === true,
     ...normalizeVisibilitySettings(row),
   };
 }
@@ -201,8 +257,19 @@ function notifyUsersProfileUpdated(userIds: number[]) {
 
 export const getOrgStructure = async (_req: Request, res: Response) => {
   try {
-    const [unitNaturesResult, unitsResult, departmentsResult, positionsResult] = await Promise.all([
+    const [
+      unitNaturesResult,
+      projectTypesResult,
+      constructionNaturesResult,
+      businessDomainsResult,
+      unitsResult,
+      departmentsResult,
+      positionsResult,
+    ] = await Promise.all([
       pool.query(`SELECT ${unitNatureReturningSql} FROM org_unit_natures ORDER BY sort_order ASC, id ASC`),
+      pool.query(`SELECT ${projectTypeReturningSql} FROM project_types ORDER BY sort_order ASC, id ASC`),
+      pool.query(`SELECT ${constructionNatureReturningSql} FROM construction_natures ORDER BY sort_order ASC, id ASC`),
+      pool.query('SELECT id, code, name FROM business_domains ORDER BY sort_order ASC, id ASC'),
       pool.query(`SELECT ${unitReturningSql} FROM org_units ORDER BY sort_order ASC, id ASC`),
       pool.query(`SELECT ${departmentReturningSql} FROM org_departments ORDER BY sort_order ASC, id ASC`),
       pool.query(`SELECT ${positionReturningSql} FROM org_positions ORDER BY sort_order ASC, id ASC`),
@@ -210,6 +277,9 @@ export const getOrgStructure = async (_req: Request, res: Response) => {
 
     res.json({
       unitNatures: unitNaturesResult.rows,
+      projectTypes: projectTypesResult.rows,
+      constructionNatures: constructionNaturesResult.rows,
+      businessDomains: businessDomainsResult.rows,
       units: unitsResult.rows,
       departments: departmentsResult.rows,
       positions: positionsResult.rows,
@@ -333,6 +403,180 @@ export const activateUnitNaturesForOrg = async (req: Request, res: Response) => 
   } catch (error) {
     console.error('添加单位性质到单位管理失败:', error);
     res.status(500).json({ message: '添加单位性质失败' });
+  }
+};
+
+export const deactivateUnitNatureForOrg = async (req: Request, res: Response) => {
+  const unitNatureId = parseRequiredInt(req.params.unitNatureId);
+  if (!unitNatureId) {
+    return res.status(400).json({ message: '无效单位性质' });
+  }
+
+  const affectedUserIds = await findAffectedUserIdsByUnitNature(unitNatureId);
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const unitNatureResult = await client.query(
+      `UPDATE org_unit_natures
+       SET org_enabled = FALSE, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1
+       RETURNING ${unitNatureReturningSql}`,
+      [unitNatureId],
+    );
+
+    if (unitNatureResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: '单位性质不存在' });
+    }
+
+    await client.query('DELETE FROM org_units WHERE unit_nature_id = $1', [unitNatureId]);
+    await client.query('COMMIT');
+
+    notifyUsersProfileUpdated(affectedUserIds);
+    emitOrgStructureUpdated('unitNature');
+    res.json({ unitNature: unitNatureResult.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('从单位管理中删除单位性质失败:', error);
+    res.status(500).json({ message: '从单位管理中删除单位性质失败' });
+  } finally {
+    client.release();
+  }
+};
+
+export const createProjectType = async (req: Request, res: Response) => {
+  try {
+    const name = normalizeName(req.body?.name);
+    if (!name) {
+      return res.status(400).json({ message: '请输入项目类型名称' });
+    }
+
+    const result = await createPlatformConfigItem('project_types', name);
+    emitOrgStructureUpdated('projectType');
+    res.status(201).json({ projectType: result.rows[0] });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: '项目类型名称已存在' });
+    }
+    console.error('创建项目类型失败:', error);
+    res.status(500).json({ message: '创建项目类型失败' });
+  }
+};
+
+export const renameProjectType = async (req: Request, res: Response) => {
+  try {
+    const projectTypeId = parseRequiredInt(req.params.projectTypeId);
+    const name = normalizeName(req.body?.name);
+
+    if (!projectTypeId) {
+      return res.status(400).json({ message: '无效项目类型' });
+    }
+    if (!name) {
+      return res.status(400).json({ message: '请输入项目类型名称' });
+    }
+
+    const result = await renamePlatformConfigItem('project_types', projectTypeId, name);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: '项目类型不存在' });
+    }
+
+    emitOrgStructureUpdated('projectType');
+    res.json({ projectType: result.rows[0] });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: '项目类型名称已存在' });
+    }
+    console.error('重命名项目类型失败:', error);
+    res.status(500).json({ message: '重命名项目类型失败' });
+  }
+};
+
+export const deleteProjectType = async (req: Request, res: Response) => {
+  try {
+    const projectTypeId = parseRequiredInt(req.params.projectTypeId);
+    if (!projectTypeId) {
+      return res.status(400).json({ message: '无效项目类型' });
+    }
+
+    const result = await deletePlatformConfigItem('project_types', projectTypeId);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: '项目类型不存在' });
+    }
+
+    emitOrgStructureUpdated('projectType');
+    res.json({ message: '删除成功' });
+  } catch (error) {
+    console.error('删除项目类型失败:', error);
+    res.status(500).json({ message: '删除项目类型失败' });
+  }
+};
+
+export const createConstructionNature = async (req: Request, res: Response) => {
+  try {
+    const name = normalizeName(req.body?.name);
+    if (!name) {
+      return res.status(400).json({ message: '请输入建设性质名称' });
+    }
+
+    const result = await createPlatformConfigItem('construction_natures', name);
+    emitOrgStructureUpdated('constructionNature');
+    res.status(201).json({ constructionNature: result.rows[0] });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: '建设性质名称已存在' });
+    }
+    console.error('创建建设性质失败:', error);
+    res.status(500).json({ message: '创建建设性质失败' });
+  }
+};
+
+export const renameConstructionNature = async (req: Request, res: Response) => {
+  try {
+    const constructionNatureId = parseRequiredInt(req.params.constructionNatureId);
+    const name = normalizeName(req.body?.name);
+
+    if (!constructionNatureId) {
+      return res.status(400).json({ message: '无效建设性质' });
+    }
+    if (!name) {
+      return res.status(400).json({ message: '请输入建设性质名称' });
+    }
+
+    const result = await renamePlatformConfigItem('construction_natures', constructionNatureId, name);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: '建设性质不存在' });
+    }
+
+    emitOrgStructureUpdated('constructionNature');
+    res.json({ constructionNature: result.rows[0] });
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return res.status(409).json({ message: '建设性质名称已存在' });
+    }
+    console.error('重命名建设性质失败:', error);
+    res.status(500).json({ message: '重命名建设性质失败' });
+  }
+};
+
+export const deleteConstructionNature = async (req: Request, res: Response) => {
+  try {
+    const constructionNatureId = parseRequiredInt(req.params.constructionNatureId);
+    if (!constructionNatureId) {
+      return res.status(400).json({ message: '无效建设性质' });
+    }
+
+    const result = await deletePlatformConfigItem('construction_natures', constructionNatureId);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: '建设性质不存在' });
+    }
+
+    emitOrgStructureUpdated('constructionNature');
+    res.json({ message: '删除成功' });
+  } catch (error) {
+    console.error('删除建设性质失败:', error);
+    res.status(500).json({ message: '删除建设性质失败' });
   }
 };
 
@@ -649,7 +893,7 @@ export const getUnassignedPeople = async (_req: Request, res: Response) => {
 
 export const updateSystemSettingsVisibility = async (req: Request, res: Response) => {
   try {
-    const targetType = typeof req.params.targetType === 'string' ? req.params.targetType : '';
+    const targetType = 'person';
     const targetId = parseRequiredInt(req.params.targetId);
     const visibilitySettings = parseVisibilitySettings(req.body);
 
@@ -662,114 +906,33 @@ export const updateSystemSettingsVisibility = async (req: Request, res: Response
     }
 
     const visibilityValues = getVisibilityValues(visibilitySettings);
+    const result = await pool.query(
+      `UPDATE users
+       SET
+         dashboard_visible = $1,
+         ai_chat_visible = $2,
+         projects_visible = $3,
+         project_create_allowed = $4,
+         project_edit_allowed = $5,
+         project_delete_allowed = $6,
+         user_query_visible = $7,
+         system_settings_visible = $8,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE id = $9
+       RETURNING ${personReturningSql}`,
+      [...visibilityValues, targetId],
+    );
 
-    if (targetType === 'unit') {
-      const affectedUserIds = await findAffectedUserIdsByUnit(targetId);
-      const result = await pool.query(
-        `UPDATE org_units
-         SET
-           dashboard_visible = $1,
-           ai_chat_visible = $2,
-           projects_visible = $3,
-           user_query_visible = $4,
-           system_settings_visible = $5,
-           updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6
-         RETURNING ${unitReturningSql}`,
-        [...visibilityValues, targetId],
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: '单位不存在' });
-      }
-
-      notifyUsersProfileUpdated(affectedUserIds);
-      emitOrgStructureUpdated('unit');
-      res.json({ targetType, item: result.rows[0] });
-      return;
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: '人员不存在' });
     }
 
-    if (targetType === 'department') {
-      const affectedUserIds = await findAffectedUserIdsByDepartment(targetId);
-      const result = await pool.query(
-        `UPDATE org_departments
-         SET
-           dashboard_visible = $1,
-           ai_chat_visible = $2,
-           projects_visible = $3,
-           user_query_visible = $4,
-           system_settings_visible = $5,
-           updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6
-         RETURNING ${departmentReturningSql}`,
-        [...visibilityValues, targetId],
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: '部门不存在' });
-      }
-
-      notifyUsersProfileUpdated(affectedUserIds);
-      emitOrgStructureUpdated('department');
-      res.json({ targetType, item: result.rows[0] });
-      return;
-    }
-
-    if (targetType === 'position') {
-      const affectedUserIds = await findAffectedUserIdsByPosition(targetId);
-      const result = await pool.query(
-        `UPDATE org_positions
-         SET
-           dashboard_visible = $1,
-           ai_chat_visible = $2,
-           projects_visible = $3,
-           user_query_visible = $4,
-           system_settings_visible = $5,
-           updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6
-         RETURNING ${positionReturningSql}`,
-        [...visibilityValues, targetId],
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: '职位不存在' });
-      }
-
-      notifyUsersProfileUpdated(affectedUserIds);
-      emitOrgStructureUpdated('position');
-      res.json({ targetType, item: result.rows[0] });
-      return;
-    }
-
-    if (targetType === 'person') {
-      const result = await pool.query(
-        `UPDATE users
-         SET
-           dashboard_visible = $1,
-           ai_chat_visible = $2,
-           projects_visible = $3,
-           user_query_visible = $4,
-           system_settings_visible = $5,
-           updated_at = CURRENT_TIMESTAMP
-         WHERE id = $6
-         RETURNING ${personReturningSql}`,
-        [...visibilityValues, targetId],
-      );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ message: '人员不存在' });
-      }
-
-      emitUserProfileUpdated(targetId);
-      emitUserDirectoryUpdated(targetId);
-      res.json({
-        targetType,
-        item: mapPersonRow(result.rows[0], null),
-      });
-      return;
-    }
-
-    return res.status(400).json({ message: '不支持的权限目标' });
+    emitUserProfileUpdated(targetId);
+    emitUserDirectoryUpdated(targetId);
+    res.json({
+      targetType,
+      item: mapPersonRow(result.rows[0], null),
+    });
   } catch (error) {
     console.error('更新权限失败:', error);
     res.status(500).json({ message: '更新权限失败' });

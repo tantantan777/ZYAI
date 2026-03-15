@@ -12,6 +12,24 @@ export const createOrgStructureTables = async () => {
       UNIQUE(name)
     );
 
+    CREATE TABLE IF NOT EXISTS project_types (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(200) NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(name)
+    );
+
+    CREATE TABLE IF NOT EXISTS construction_natures (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(200) NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(name)
+    );
+
     CREATE TABLE IF NOT EXISTS org_units (
       id SERIAL PRIMARY KEY,
       unit_nature_id INTEGER,
@@ -57,6 +75,35 @@ export const createOrgStructureTables = async () => {
       UNIQUE(department_id, name)
     );
 
+    CREATE TABLE IF NOT EXISTS business_domains (
+      id SERIAL PRIMARY KEY,
+      code VARCHAR(100) NOT NULL UNIQUE,
+      name VARCHAR(200) NOT NULL,
+      sort_order INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS department_business_domains (
+      department_id INTEGER NOT NULL REFERENCES org_departments(id) ON DELETE CASCADE,
+      business_domain_id INTEGER NOT NULL REFERENCES business_domains(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (department_id, business_domain_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS position_business_permissions (
+      position_id INTEGER NOT NULL REFERENCES org_positions(id) ON DELETE CASCADE,
+      business_domain_id INTEGER NOT NULL REFERENCES business_domains(id) ON DELETE CASCADE,
+      can_view BOOLEAN NOT NULL DEFAULT FALSE,
+      can_create BOOLEAN NOT NULL DEFAULT FALSE,
+      can_edit BOOLEAN NOT NULL DEFAULT FALSE,
+      can_delete BOOLEAN NOT NULL DEFAULT FALSE,
+      can_upload BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (position_id, business_domain_id)
+    );
+
     -- Later: logged-in users can bind themselves to a position.
     CREATE TABLE IF NOT EXISTS user_org_positions (
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -68,6 +115,8 @@ export const createOrgStructureTables = async () => {
     CREATE INDEX IF NOT EXISTS idx_org_departments_unit_id ON org_departments(unit_id);
     CREATE INDEX IF NOT EXISTS idx_org_positions_department_id ON org_positions(department_id);
     CREATE INDEX IF NOT EXISTS idx_user_org_positions_position_id ON user_org_positions(position_id);
+    CREATE INDEX IF NOT EXISTS idx_department_business_domains_domain_id ON department_business_domains(business_domain_id);
+    CREATE INDEX IF NOT EXISTS idx_position_business_permissions_domain_id ON position_business_permissions(business_domain_id);
   `;
 
   await pool.query(query);
@@ -108,4 +157,13 @@ export const createOrgStructureTables = async () => {
       await pool.query(`UPDATE ${tableName} SET ${column} = TRUE WHERE ${column} IS NULL;`);
     }
   }
+
+  await pool.query(`
+    INSERT INTO business_domains (code, name, sort_order)
+    VALUES ('project_management', '项目管理', 0)
+    ON CONFLICT (code) DO UPDATE
+    SET name = EXCLUDED.name,
+        sort_order = EXCLUDED.sort_order,
+        updated_at = CURRENT_TIMESTAMP
+  `);
 };

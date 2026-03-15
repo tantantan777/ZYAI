@@ -6,10 +6,14 @@ import authRoutes from './routes/auth';
 import chatRoutes from './routes/chat';
 import aiConfigRoutes from './routes/aiConfig';
 import orgRoutes from './routes/org';
+import projectRoutes from './routes/project';
+import systemLogRoutes from './routes/systemLog';
 import userRoutes from './routes/user';
 import { createUsersTable } from './models/user';
 import { createAIConfigTable, createConversationsTable, createMessagesTable } from './models/aiConfig';
+import { createAuditLogsTable } from './models/auditLog';
 import { createOrgStructureTables } from './models/orgStructure';
+import { createProjectTables } from './models/project';
 import { expressCorsOptions } from './config/cors';
 import { presenceService } from './services/presenceService';
 import { attachSocketServer } from './services/socketServer';
@@ -22,12 +26,14 @@ const server = createServer(app);
 const PORT = process.env.PORT || 3000;
 
 app.use(cors(expressCorsOptions));
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '20mb' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/ai-config', aiConfigRoutes);
 app.use('/api/org', orgRoutes);
+app.use('/api/projects', projectRoutes);
+app.use('/api/system-logs', systemLogRoutes);
 app.use('/api/user', userRoutes);
 
 app.get('/health', (_req, res) => {
@@ -40,7 +46,9 @@ const initDatabase = async () => {
     await createAIConfigTable();
     await createConversationsTable();
     await createMessagesTable();
+    await createAuditLogsTable();
     await createOrgStructureTables();
+    await createProjectTables();
     console.log('Database tables initialized');
   } catch (error) {
     console.error('Failed to initialize database tables:', error);

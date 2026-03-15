@@ -47,3 +47,133 @@
 .project-list-context-menu button.danger {
   color: #ff4d4f;
 }
+
+.project-list-detail-basic {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.project-list-detail-cover {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  padding: 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.project-list-detail-cover__image {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.project-list-detail-descriptions {
+  min-width: 0;
+}
+
+.project-list-status-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.project-list-status-tags--center {
+  justify-content: center;
+}
+
+.project-list-unit-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.project-list-unit-card {
+  border-radius: 8px;
+}
+
+.project-list-unit-members-table {
+  margin-top: 12px;
+}
+
+.project-list-unit-members-table .ant-table-thead > tr > th,
+.project-list-unit-members-table .ant-table-tbody > tr > td {
+  text-align: center;
+}
+
+.project-list-edit-photo {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.project-list-edit-photo__tip,
+.project-list-unit-editor__hint {
+  color: #8c8c8c;
+  font-size: 12px;
+}
+
+.project-list-edit-section {
+  padding-top: 8px;
+}
+
+.project-list-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+}
+
+.project-list-edit-grid__full {
+  grid-column: 1 / -1;
+}
+
+.project-list-unit-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-top: 8px;
+}
+
+.project-list-unit-editor__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.project-list-unit-editor__list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.project-list-unit-editor__card {
+  border-radius: 8px;
+}
+
+@media (min-width: 1200px) {
+  .project-list-edit-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1600px) {
+  .project-list-edit-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 991px) {
+  .project-list-detail-basic {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-list-edit-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

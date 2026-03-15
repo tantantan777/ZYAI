@@ -1,7 +1,8 @@
-import { Request, Response } from 'express';
+﻿import { Request, Response } from 'express';
 import pool from '../config/database';
+import { createAuditLogSafe } from '../services/auditLogService';
 
-function parseOptionalNumber(value: any): number | null {
+function parseOptionalNumber(value: unknown): number | null {
   if (value === undefined || value === null || value === '') {
     return null;
   }
@@ -10,11 +11,12 @@ function parseOptionalNumber(value: any): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function parseOptionalInt(value: any): number | null {
+function parseOptionalInt(value: unknown): number | null {
   const parsed = parseOptionalNumber(value);
   if (parsed === null) {
     return null;
   }
+
   return Math.trunc(parsed);
 }
 
@@ -38,7 +40,7 @@ export const getAIConfig = async (req: Request, res: Response) => {
         max_retries
        FROM ai_configs
        WHERE user_id = $1`,
-      [userId]
+      [userId],
     );
 
     if (result.rows.length === 0) {
@@ -82,15 +84,12 @@ export const saveAIConfig = async (req: Request, res: Response) => {
     const timeoutMsValue = parseOptionalInt(timeoutMs);
     const maxRetriesValue = parseOptionalInt(maxRetries);
 
-    const openaiOrganizationValue = provider === 'openai' ? (openaiOrganization || null) : null;
-    const openaiProjectValue = provider === 'openai' ? (openaiProject || null) : null;
-    const anthropicVersionValue = provider === 'anthropic' ? (anthropicVersion || null) : null;
+    const openaiOrganizationValue = provider === 'openai' ? openaiOrganization || null : null;
+    const openaiProjectValue = provider === 'openai' ? openaiProject || null : null;
+    const anthropicVersionValue = provider === 'anthropic' ? anthropicVersion || null : null;
     const topKProviderValue = provider === 'anthropic' ? topKValue : null;
 
-    const existingConfig = await pool.query(
-      'SELECT id FROM ai_configs WHERE user_id = $1',
-      [userId]
-    );
+    const existingConfig = await pool.query('SELECT id FROM ai_configs WHERE user_id = $1', [userId]);
 
     if (existingConfig.rows.length > 0) {
       await pool.query(
@@ -126,7 +125,7 @@ export const saveAIConfig = async (req: Request, res: Response) => {
           timeoutMsValue,
           maxRetriesValue,
           userId,
-        ]
+        ],
       );
     } else {
       await pool.query(
@@ -163,9 +162,17 @@ export const saveAIConfig = async (req: Request, res: Response) => {
           topKProviderValue,
           timeoutMsValue,
           maxRetriesValue,
-        ]
+        ],
       );
     }
+
+    await createAuditLogSafe({
+      userId,
+      actionType: 'edit',
+      targetType: 'AI配置',
+      targetName: String(model),
+      detail: `服务商：${String(provider)}`,
+    });
 
     res.json({ message: 'AI配置保存成功' });
   } catch (error) {

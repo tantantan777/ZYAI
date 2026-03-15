@@ -34,6 +34,9 @@ export const createUsersTable = async () => {
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS hire_date DATE;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP;`);
   await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active_at TIMESTAMP;`);
+  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_system_admin BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await pool.query(`ALTER TABLE users ALTER COLUMN is_system_admin SET DEFAULT FALSE;`);
+  await pool.query(`UPDATE users SET is_system_admin = FALSE WHERE is_system_admin IS NULL;`);
 
   const visibilityColumns = [
     'dashboard_visible',
@@ -43,7 +46,32 @@ export const createUsersTable = async () => {
     'system_settings_visible',
   ];
 
+  const projectActionColumns = [
+    'project_create_allowed',
+    'project_edit_allowed',
+    'project_delete_allowed',
+  ];
+
   for (const column of visibilityColumns) {
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${column} BOOLEAN NOT NULL DEFAULT TRUE;`);
+    await pool.query(`ALTER TABLE users ALTER COLUMN ${column} SET DEFAULT TRUE;`);
+    await pool.query(`UPDATE users SET ${column} = TRUE WHERE ${column} IS NULL;`);
+  }
+
+  await pool.query(`
+    WITH first_user AS (
+      SELECT id
+      FROM users
+      ORDER BY created_at ASC, id ASC
+      LIMIT 1
+    )
+    UPDATE users
+    SET is_system_admin = TRUE
+    WHERE id IN (SELECT id FROM first_user)
+      AND NOT EXISTS (SELECT 1 FROM users WHERE is_system_admin = TRUE)
+  `);
+
+  for (const column of projectActionColumns) {
     await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS ${column} BOOLEAN NOT NULL DEFAULT TRUE;`);
     await pool.query(`ALTER TABLE users ALTER COLUMN ${column} SET DEFAULT TRUE;`);
     await pool.query(`UPDATE users SET ${column} = TRUE WHERE ${column} IS NULL;`);

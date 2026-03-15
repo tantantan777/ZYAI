@@ -1,9 +1,12 @@
 ﻿import { useEffect, useMemo, useState } from 'react';
-import { Card, Tabs, Form, Input, Select, Button, Space, InputNumber, Row, Col, Empty, Modal, Tooltip, Dropdown, Switch } from 'antd';
+import { Card, Tabs, Form, Input, Select, Button, Space, InputNumber, Row, Col, Empty, Modal, Tooltip, Dropdown, Switch, Table, Tag } from 'antd';
 import type { MenuProps } from 'antd';
 import { SaveOutlined, PlusOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
 import api from '../utils/api';
+import { logClientAuditAsync } from '../utils/audit';
 import { openActionConfirmDialog, openDeleteDialog } from '../utils/confirm';
+import ResettableTabs from '../components/ResettableTabs';
 import {
   ensureRealtimeConnection,
   type OrgStructureUpdatedEvent,
@@ -42,41 +45,68 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
   anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
 };
 
-interface VisibilitySettings {
-  dashboardVisible: boolean;
-  aiChatVisible: boolean;
-  projectsVisible: boolean;
-  userQueryVisible: boolean;
-  systemSettingsVisible: boolean;
-}
-
-const defaultVisibilitySettings: VisibilitySettings = {
-  dashboardVisible: true,
-  aiChatVisible: true,
-  projectsVisible: true,
-  userQueryVisible: true,
-  systemSettingsVisible: true,
+type ProjectSummaryItem = {
+  id: number;
+  name: string;
+  manager?: string | null;
+  projectTypeName?: string | null;
+  constructionNatureName?: string | null;
 };
 
-const permissionFieldOptions: Array<{ key: keyof VisibilitySettings; label: string }> = [
-  { key: 'dashboardVisible', label: '工作台权限' },
-  { key: 'aiChatVisible', label: 'AI对话页面权限' },
-  { key: 'projectsVisible', label: '项目管理页面权限' },
-  { key: 'userQueryVisible', label: '用户查询页面权限' },
-  { key: 'systemSettingsVisible', label: '系统配置页权限' },
-];
+type BusinessDomainItem = {
+  id: number;
+  code: string;
+  name: string;
+};
 
-function normalizeVisibilitySettings(settings?: Partial<VisibilitySettings>): VisibilitySettings {
-  return {
-    dashboardVisible: settings?.dashboardVisible !== false,
-    aiChatVisible: settings?.aiChatVisible !== false,
-    projectsVisible: settings?.projectsVisible !== false,
-    userQueryVisible: settings?.userQueryVisible !== false,
-    systemSettingsVisible: settings?.systemSettingsVisible !== false,
-  };
+type PositionBusinessPermissionItem = {
+  businessDomainId: number;
+  code: string;
+  name: string;
+  canView: boolean;
+  canCreate: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  canUpload: boolean;
+};
+
+interface SystemLogItem {
+  id: number;
+  userId: number | null;
+  userName: string | null;
+  userEmail: string | null;
+  unitName?: string | null;
+  departmentName?: string | null;
+  positionName?: string | null;
+  actionType: 'add' | 'edit' | 'delete';
+  targetType: string;
+  targetName: string;
+  detail?: string | null;
+  createdAt: string;
 }
 
-interface OrgUnitItem extends VisibilitySettings {
+const actionTypeLabelMap: Record<SystemLogItem['actionType'], string> = {
+  add: '添加',
+  edit: '编辑',
+  delete: '删除',
+};
+
+const actionTypeColorMap: Record<SystemLogItem['actionType'], string> = {
+  add: 'success',
+  edit: 'processing',
+  delete: 'error',
+};
+
+function formatLogTimestamp(value?: string) {
+  if (!value) {
+    return '-';
+  }
+
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format('YYYY-MM-DD HH:mm:ss') : '-';
+}
+
+interface OrgUnitItem {
   id: number;
   unitNatureId: number | null;
   name: string;
@@ -88,42 +118,53 @@ interface OrgUnitNatureItem {
   orgEnabled?: boolean;
 }
 
-interface OrgDepartmentItem extends VisibilitySettings {
+interface ProjectTypeItem {
+  id: number;
+  name: string;
+}
+
+interface ConstructionNatureItem {
+  id: number;
+  name: string;
+}
+
+interface OrgDepartmentItem {
   id: number;
   unitId: number;
   name: string;
 }
 
-interface OrgPositionItem extends VisibilitySettings {
+interface OrgPositionItem {
   id: number;
   departmentId: number;
   name: string;
 }
 
-interface OrgPersonItem extends VisibilitySettings {
+interface OrgPersonItem {
   id: number;
   positionId: number | null;
   name: string;
   email?: string;
   phone?: string;
+  isSystemAdmin?: boolean;
 }
 
-type OrgContextType = 'unitNature' | 'unit' | 'department' | 'position' | 'person';
-type PermissionContextType = Exclude<OrgContextType, 'unitNature'>;
+type OrgContextType =
+  | 'unitNature'
+  | 'projectType'
+  | 'constructionNature'
+  | 'unit'
+  | 'department'
+  | 'position'
+  | 'person';
 
 type RenameTarget = {
   type: OrgContextType;
   id: number;
   name: string;
   positionId?: number | null;
-} & Partial<VisibilitySettings>;
-
-type PermissionTarget = {
-  type: PermissionContextType;
-  id: number;
-  name: string;
-  positionId?: number | null;
-} & Partial<VisibilitySettings>;
+  scope?: 'platform' | 'org';
+};
 
 type MovePersonTarget = {
   id: number;
@@ -131,17 +172,44 @@ type MovePersonTarget = {
   positionId: number | null;
 };
 
+type UnitProjectTarget = {
+  id: number;
+  name: string;
+};
+
+type DepartmentBusinessTarget = {
+  id: number;
+  name: string;
+};
+
+type PositionBusinessTarget = {
+  id: number;
+  name: string;
+};
+
+type PersonSystemAdminTarget = {
+  id: number;
+  name: string;
+  isSystemAdmin: boolean;
+};
+
 export default function SystemSettings() {
   const [form] = Form.useForm<AIConfigForm>();
   const [saveLoading, setSaveLoading] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<string>('openai');
-  const [activeTabKey, setActiveTabKey] = useState('ai');
+  const [activeTabKey, setActiveTabKey] = useState('platform');
 
   const [unitNatures, setUnitNatures] = useState<OrgUnitNatureItem[]>([]);
+  const [projectTypes, setProjectTypes] = useState<ProjectTypeItem[]>([]);
+  const [constructionNatures, setConstructionNatures] = useState<ConstructionNatureItem[]>([]);
+  const [businessDomains, setBusinessDomains] = useState<BusinessDomainItem[]>([]);
   const [units, setUnits] = useState<OrgUnitItem[]>([]);
   const [departments, setDepartments] = useState<OrgDepartmentItem[]>([]);
   const [positions, setPositions] = useState<OrgPositionItem[]>([]);
   const [people, setPeople] = useState<OrgPersonItem[]>([]);
+  const [projects, setProjects] = useState<ProjectSummaryItem[]>([]);
+  const [systemLogs, setSystemLogs] = useState<SystemLogItem[]>([]);
+  const [systemLogsLoading, setSystemLogsLoading] = useState(false);
 
   const [selectedUnitNatureId, setSelectedUnitNatureId] = useState<number>(UNASSIGNED_UNIT_NATURE_ID);
   const [selectedUnitId, setSelectedUnitId] = useState<number>(0);
@@ -149,11 +217,15 @@ export default function SystemSettings() {
   const [selectedPositionId, setSelectedPositionId] = useState<number>(0);
 
   const [addUnitNatureModalOpen, setAddUnitNatureModalOpen] = useState(false);
+  const [addProjectTypeModalOpen, setAddProjectTypeModalOpen] = useState(false);
+  const [addConstructionNatureModalOpen, setAddConstructionNatureModalOpen] = useState(false);
   const [selectOrgUnitNatureModalOpen, setSelectOrgUnitNatureModalOpen] = useState(false);
   const [addUnitModalOpen, setAddUnitModalOpen] = useState(false);
   const [addDepartmentModalOpen, setAddDepartmentModalOpen] = useState(false);
   const [addPositionModalOpen, setAddPositionModalOpen] = useState(false);
   const [addUnitNatureName, setAddUnitNatureName] = useState('');
+  const [addProjectTypeName, setAddProjectTypeName] = useState('');
+  const [addConstructionNatureName, setAddConstructionNatureName] = useState('');
   const [selectOrgUnitNatureIds, setSelectOrgUnitNatureIds] = useState<number[]>([]);
   const [addUnitName, setAddUnitName] = useState('');
   const [addDepartmentName, setAddDepartmentName] = useState('');
@@ -161,24 +233,34 @@ export default function SystemSettings() {
   const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [renameSubmitting, setRenameSubmitting] = useState(false);
-  const [permissionTarget, setPermissionTarget] = useState<PermissionTarget | null>(null);
-  const [permissionValues, setPermissionValues] = useState<VisibilitySettings>(defaultVisibilitySettings);
-  const [permissionSubmitting, setPermissionSubmitting] = useState(false);
   const [moveTarget, setMoveTarget] = useState<MovePersonTarget | null>(null);
   const [moveUnitId, setMoveUnitId] = useState<number>(0);
   const [moveDepartmentId, setMoveDepartmentId] = useState<number>(0);
   const [movePositionId, setMovePositionId] = useState<number>(0);
   const [moveSubmitting, setMoveSubmitting] = useState(false);
+  const [unitProjectTarget, setUnitProjectTarget] = useState<UnitProjectTarget | null>(null);
+  const [unitProjectIds, setUnitProjectIds] = useState<number[]>([]);
+  const [unitProjectLoading, setUnitProjectLoading] = useState(false);
+  const [unitProjectSubmitting, setUnitProjectSubmitting] = useState(false);
+  const [departmentBusinessTarget, setDepartmentBusinessTarget] = useState<DepartmentBusinessTarget | null>(null);
+  const [departmentBusinessDomainIds, setDepartmentBusinessDomainIds] = useState<number[]>([]);
+  const [departmentBusinessLoading, setDepartmentBusinessLoading] = useState(false);
+  const [departmentBusinessSubmitting, setDepartmentBusinessSubmitting] = useState(false);
+  const [positionBusinessTarget, setPositionBusinessTarget] = useState<PositionBusinessTarget | null>(null);
+  const [positionBusinessPermissions, setPositionBusinessPermissions] = useState<PositionBusinessPermissionItem[]>([]);
+  const [positionBusinessLoading, setPositionBusinessLoading] = useState(false);
+  const [positionBusinessSubmitting, setPositionBusinessSubmitting] = useState(false);
+  const [systemAdminTarget, setSystemAdminTarget] = useState<PersonSystemAdminTarget | null>(null);
+  const [systemAdminValue, setSystemAdminValue] = useState(false);
+  const [systemAdminSubmitting, setSystemAdminSubmitting] = useState(false);
 
-  const getContextMenuWithPermissionProps = (
-    target: PermissionTarget,
-  ): { menu: MenuProps; trigger: ['contextMenu'] } => ({
+  const getUnitContextMenuProps = (target: RenameTarget): { menu: MenuProps; trigger: ['contextMenu'] } => ({
     trigger: ['contextMenu'],
     menu: {
       items: [
-        { key: 'rename', label: '\u91cd\u547d\u540d' },
-        { key: 'permission', label: '\u6743\u9650' },
-        { key: 'delete', label: '\u5220\u9664', danger: true },
+        { key: 'rename', label: '重命名' },
+        { key: 'project-assignment', label: '项目分配' },
+        { key: 'delete', label: '删除', danger: true },
       ],
       onClick: ({ key }) => {
         if (key === 'rename') {
@@ -186,8 +268,8 @@ export default function SystemSettings() {
           return;
         }
 
-        if (key === 'permission') {
-          openPermissionModal(target);
+        if (key === 'project-assignment') {
+          void openUnitProjectModal({ id: target.id, name: target.name });
           return;
         }
 
@@ -198,17 +280,67 @@ export default function SystemSettings() {
     },
   });
 
-  const getPersonContextMenuWithPermissionProps = (
-    target: PermissionTarget,
+  const getDepartmentContextMenuProps = (target: RenameTarget): { menu: MenuProps; trigger: ['contextMenu'] } => ({
+    trigger: ['contextMenu'],
+    menu: {
+      items: [
+        { key: 'rename', label: '重命名' },
+        { key: 'business-scope', label: '业务范围' },
+        { key: 'delete', label: '删除', danger: true },
+      ],
+      onClick: ({ key }) => {
+        if (key === 'rename') {
+          openRenameModal(target);
+          return;
+        }
+
+        if (key === 'business-scope') {
+          void openDepartmentBusinessModal({ id: target.id, name: target.name });
+          return;
+        }
+
+        if (key === 'delete') {
+          handleDelete(target);
+        }
+      },
+    },
+  });
+
+  const getPositionContextMenuProps = (target: RenameTarget): { menu: MenuProps; trigger: ['contextMenu'] } => ({
+    trigger: ['contextMenu'],
+    menu: {
+      items: [
+        { key: 'rename', label: '重命名' },
+        { key: 'business-permission', label: '业务权限' },
+        { key: 'delete', label: '删除', danger: true },
+      ],
+      onClick: ({ key }) => {
+        if (key === 'rename') {
+          openRenameModal(target);
+          return;
+        }
+
+        if (key === 'business-permission') {
+          void openPositionBusinessModal({ id: target.id, name: target.name });
+          return;
+        }
+
+        if (key === 'delete') {
+          handleDelete(target);
+        }
+      },
+    },
+  });
+
+  const getPersonContextMenuProps = (
+    target: MovePersonTarget & { isSystemAdmin?: boolean },
   ): { menu: MenuProps; trigger: ['contextMenu'] } => ({
     trigger: ['contextMenu'],
     menu: {
       items: [
         { key: 'move', label: '移动' },
-        { key: 'permission', label: '\u6743\u9650' },
-        ...(target.positionId
-          ? [{ key: 'delete', label: '\u5220\u9664', danger: true }]
-          : []),
+        { key: 'system-admin', label: '系统管理员' },
+        ...(target.positionId ? [{ key: 'delete', label: '移除', danger: true }] : []),
       ],
       onClick: ({ key }) => {
         if (key === 'move') {
@@ -220,13 +352,22 @@ export default function SystemSettings() {
           return;
         }
 
-        if (key === 'permission') {
-          openPermissionModal(target);
+        if (key === 'system-admin') {
+          openSystemAdminModal({
+            id: target.id,
+            name: target.name,
+            isSystemAdmin: target.isSystemAdmin === true,
+          });
           return;
         }
 
         if (key === 'delete') {
-          handleDelete(target);
+          handleDelete({
+            type: 'person',
+            id: target.id,
+            name: target.name,
+            positionId: target.positionId ?? null,
+          });
         }
       },
     },
@@ -254,10 +395,30 @@ export default function SystemSettings() {
     },
   });
 
+  const getOrgUnitNatureContextMenuProps = (
+    target: RenameTarget,
+  ): { menu: MenuProps; trigger: ['contextMenu'] } => ({
+    trigger: ['contextMenu'],
+    menu: {
+      items: [{ key: 'delete', label: '删除', danger: true }],
+      onClick: ({ key }) => {
+        if (key === 'delete') {
+          handleDelete(target);
+        }
+      },
+    },
+  });
+
   useEffect(() => {
     void loadAIConfig();
     void loadOrgStructure();
   }, []);
+
+  useEffect(() => {
+    if (activeTabKey === 'logs') {
+      void loadSystemLogs();
+    }
+  }, [activeTabKey]);
 
   const loadAIConfig = async () => {
     try {
@@ -303,11 +464,17 @@ export default function SystemSettings() {
     try {
       const response = await api.get('/org/structure');
       const nextUnitNatures = (response.data.unitNatures ?? []) as OrgUnitNatureItem[];
+      const nextProjectTypes = (response.data.projectTypes ?? []) as ProjectTypeItem[];
+      const nextConstructionNatures = (response.data.constructionNatures ?? []) as ConstructionNatureItem[];
+      const nextBusinessDomains = (response.data.businessDomains ?? []) as BusinessDomainItem[];
       const nextUnits = (response.data.units ?? []) as OrgUnitItem[];
       const nextDepartments = (response.data.departments ?? []) as OrgDepartmentItem[];
       const nextPositions = (response.data.positions ?? []) as OrgPositionItem[];
 
       setUnitNatures(nextUnitNatures);
+      setProjectTypes(nextProjectTypes);
+      setConstructionNatures(nextConstructionNatures);
+      setBusinessDomains(nextBusinessDomains);
       setUnits(nextUnits);
       setDepartments(nextDepartments);
       setPositions(nextPositions);
@@ -359,6 +526,21 @@ export default function SystemSettings() {
     } catch (error) {
       console.error('加载单位配置失败:', error);
       message.error('加载单位配置失败');
+    }
+  };
+
+  const loadSystemLogs = async () => {
+    try {
+      setSystemLogsLoading(true);
+      const response = await api.get('/system-logs', {
+        params: { limit: 200 },
+      });
+      setSystemLogs((response.data.logs ?? []) as SystemLogItem[]);
+    } catch (error) {
+      console.error('加载系统日志失败:', error);
+      message.error('加载系统日志失败，请稍后重试');
+    } finally {
+      setSystemLogsLoading(false);
     }
   };
 
@@ -457,10 +639,26 @@ export default function SystemSettings() {
 
   const orgTypeLabelMap: Record<OrgContextType, string> = {
     unitNature: '单位性质',
+    projectType: '项目类型',
+    constructionNature: '建设性质',
     unit: '单位',
     department: '部门',
     position: '职位',
     person: '人员',
+  };
+
+  const logSystemAction = (
+    actionType: 'add' | 'edit' | 'delete',
+    targetType: string,
+    targetName: string,
+    detail?: string,
+  ) => {
+    logClientAuditAsync({
+      actionType,
+      targetType,
+      targetName,
+      detail,
+    });
   };
 
   const openRenameModal = (target: RenameTarget) => {
@@ -472,18 +670,6 @@ export default function SystemSettings() {
     setRenameTarget(null);
     setRenameValue('');
     setRenameSubmitting(false);
-  };
-
-  const openPermissionModal = (target: PermissionTarget) => {
-    setPermissionTarget(target);
-    setPermissionValues(normalizeVisibilitySettings(target));
-    setPermissionSubmitting(false);
-  };
-
-  const closePermissionModal = () => {
-    setPermissionTarget(null);
-    setPermissionValues(defaultVisibilitySettings);
-    setPermissionSubmitting(false);
   };
 
   const openMoveModal = (target: MovePersonTarget) => {
@@ -507,59 +693,90 @@ export default function SystemSettings() {
     setMoveSubmitting(false);
   };
 
-  const applyPermissionUpdate = (target: PermissionTarget, nextVisibility: VisibilitySettings) => {
-    if (target.type === 'unit') {
-      setUnits((prev) =>
-        prev.map((item) =>
-          item.id === target.id
-            ? {
-                ...item,
-                ...nextVisibility,
-              }
-            : item,
-        ),
-      );
-      return;
-    }
+  const openUnitProjectModal = async (target: UnitProjectTarget) => {
+    setUnitProjectTarget(target);
+    setUnitProjectLoading(true);
+    setUnitProjectSubmitting(false);
 
-    if (target.type === 'department') {
-      setDepartments((prev) =>
-        prev.map((item) =>
-          item.id === target.id
-            ? {
-                ...item,
-                ...nextVisibility,
-              }
-            : item,
-        ),
-      );
-      return;
-    }
+    try {
+      const [assignmentResponse, projectResponse] = await Promise.all([
+        api.get(`/org/units/${target.id}/project-assignments`),
+        api.get('/projects'),
+      ]);
 
-    if (target.type === 'position') {
-      setPositions((prev) =>
-        prev.map((item) =>
-          item.id === target.id
-            ? {
-                ...item,
-                ...nextVisibility,
-              }
-            : item,
-        ),
-      );
-      return;
+      setUnitProjectIds((assignmentResponse.data.projectIds ?? []) as number[]);
+      setProjects((projectResponse.data.projects ?? []) as ProjectSummaryItem[]);
+    } catch (error: any) {
+      setUnitProjectTarget(null);
+      message.error(error.response?.data?.message || '加载单位项目分配失败，请稍后重试');
+    } finally {
+      setUnitProjectLoading(false);
     }
+  };
 
-    setPeople((prev) =>
-      prev.map((item) =>
-        item.id === target.id
-          ? {
-              ...item,
-              ...nextVisibility,
-            }
-          : item,
-      ),
-    );
+  const closeUnitProjectModal = () => {
+    setUnitProjectTarget(null);
+    setUnitProjectIds([]);
+    setUnitProjectLoading(false);
+    setUnitProjectSubmitting(false);
+  };
+
+  const openDepartmentBusinessModal = async (target: DepartmentBusinessTarget) => {
+    setDepartmentBusinessTarget(target);
+    setDepartmentBusinessLoading(true);
+    setDepartmentBusinessSubmitting(false);
+
+    try {
+      const response = await api.get(`/org/departments/${target.id}/business-domains`);
+      setDepartmentBusinessDomainIds((response.data.businessDomainIds ?? []) as number[]);
+    } catch (error: any) {
+      setDepartmentBusinessTarget(null);
+      message.error(error.response?.data?.message || '加载部门业务范围失败，请稍后重试');
+    } finally {
+      setDepartmentBusinessLoading(false);
+    }
+  };
+
+  const closeDepartmentBusinessModal = () => {
+    setDepartmentBusinessTarget(null);
+    setDepartmentBusinessDomainIds([]);
+    setDepartmentBusinessLoading(false);
+    setDepartmentBusinessSubmitting(false);
+  };
+
+  const openPositionBusinessModal = async (target: PositionBusinessTarget) => {
+    setPositionBusinessTarget(target);
+    setPositionBusinessLoading(true);
+    setPositionBusinessSubmitting(false);
+
+    try {
+      const response = await api.get(`/org/positions/${target.id}/business-permissions`);
+      setPositionBusinessPermissions((response.data.permissions ?? []) as PositionBusinessPermissionItem[]);
+    } catch (error: any) {
+      setPositionBusinessTarget(null);
+      message.error(error.response?.data?.message || '加载职位业务权限失败，请稍后重试');
+    } finally {
+      setPositionBusinessLoading(false);
+    }
+  };
+
+  const closePositionBusinessModal = () => {
+    setPositionBusinessTarget(null);
+    setPositionBusinessPermissions([]);
+    setPositionBusinessLoading(false);
+    setPositionBusinessSubmitting(false);
+  };
+
+  const openSystemAdminModal = (target: PersonSystemAdminTarget) => {
+    setSystemAdminTarget(target);
+    setSystemAdminValue(target.isSystemAdmin);
+    setSystemAdminSubmitting(false);
+  };
+
+  const closeSystemAdminModal = () => {
+    setSystemAdminTarget(null);
+    setSystemAdminValue(false);
+    setSystemAdminSubmitting(false);
   };
 
   const handleRename = async () => {
@@ -578,6 +795,12 @@ export default function SystemSettings() {
       if (renameTarget.type === 'unitNature') {
         await api.put(`/org/unit-natures/${renameTarget.id}`, { name });
         await loadOrgStructure();
+      } else if (renameTarget.type === 'projectType') {
+        await api.put(`/org/project-types/${renameTarget.id}`, { name });
+        await loadOrgStructure();
+      } else if (renameTarget.type === 'constructionNature') {
+        await api.put(`/org/construction-natures/${renameTarget.id}`, { name });
+        await loadOrgStructure();
       } else if (renameTarget.type === 'unit') {
         await api.put(`/org/units/${renameTarget.id}`, { name });
         await loadOrgStructure();
@@ -595,6 +818,7 @@ export default function SystemSettings() {
       }
 
       message.success(`${orgTypeLabelMap[renameTarget.type]}已重命名`);
+      logSystemAction('edit', orgTypeLabelMap[renameTarget.type], name, `原名称：${renameTarget.name}`);
       closeRenameModal();
     } catch (error: any) {
       message.error(error.response?.data?.message || `${orgTypeLabelMap[renameTarget.type]}重命名失败，请稍后重试`);
@@ -602,21 +826,133 @@ export default function SystemSettings() {
     }
   };
 
-  const handleSavePermission = async () => {
-    if (!permissionTarget) {
+  const handleSaveUnitProjectAssignments = async () => {
+    if (!unitProjectTarget) {
       return;
     }
 
-    setPermissionSubmitting(true);
+    setUnitProjectSubmitting(true);
     try {
-      await api.put(`/org/permissions/${permissionTarget.type}/${permissionTarget.id}`, permissionValues);
-
-      applyPermissionUpdate(permissionTarget, permissionValues);
-      message.success(`${orgTypeLabelMap[permissionTarget.type]}权限已更新`);
-      closePermissionModal();
+      await api.put(`/org/units/${unitProjectTarget.id}/project-assignments`, { projectIds: unitProjectIds });
+      message.success('单位项目分配已更新');
+      logSystemAction(
+        'edit',
+        '单位项目分配',
+        unitProjectTarget.name,
+        `已分配 ${unitProjectIds.length} 个项目`,
+      );
+      closeUnitProjectModal();
     } catch (error: any) {
-      message.error(error.response?.data?.message || `${orgTypeLabelMap[permissionTarget.type]}权限更新失败，请稍后重试`);
-      setPermissionSubmitting(false);
+      message.error(error.response?.data?.message || '单位项目分配更新失败，请稍后重试');
+      setUnitProjectSubmitting(false);
+    }
+  };
+
+  const handleSaveDepartmentBusinessDomains = async () => {
+    if (!departmentBusinessTarget) {
+      return;
+    }
+
+    setDepartmentBusinessSubmitting(true);
+    try {
+      await api.put(`/org/departments/${departmentBusinessTarget.id}/business-domains`, {
+        businessDomainIds: departmentBusinessDomainIds,
+      });
+      message.success('部门业务范围已更新');
+      logSystemAction(
+        'edit',
+        '部门业务范围',
+        departmentBusinessTarget.name,
+        `已选择 ${departmentBusinessDomainIds.length} 个业务范围`,
+      );
+      closeDepartmentBusinessModal();
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '部门业务范围更新失败，请稍后重试');
+      setDepartmentBusinessSubmitting(false);
+    }
+  };
+
+  const handlePositionPermissionChange = (
+    businessDomainId: number,
+    field: 'canView' | 'canCreate' | 'canEdit' | 'canDelete' | 'canUpload',
+    checked: boolean,
+  ) => {
+    setPositionBusinessPermissions((prev) =>
+      prev.map((item) => {
+        if (item.businessDomainId !== businessDomainId) {
+          return item;
+        }
+
+        if (field === 'canView') {
+          return checked
+            ? { ...item, canView: true }
+            : {
+                ...item,
+                canView: false,
+                canCreate: false,
+                canEdit: false,
+                canDelete: false,
+                canUpload: false,
+              };
+        }
+
+        return {
+          ...item,
+          canView: checked ? true : item.canView,
+          [field]: checked,
+        };
+      }),
+    );
+  };
+
+  const handleSavePositionBusinessPermissions = async () => {
+    if (!positionBusinessTarget) {
+      return;
+    }
+
+    setPositionBusinessSubmitting(true);
+    try {
+      await api.put(`/org/positions/${positionBusinessTarget.id}/business-permissions`, {
+        permissions: positionBusinessPermissions,
+      });
+      message.success('职位业务权限已更新');
+      logSystemAction('edit', '职位业务权限', positionBusinessTarget.name);
+      closePositionBusinessModal();
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '职位业务权限更新失败，请稍后重试');
+      setPositionBusinessSubmitting(false);
+    }
+  };
+
+  const handleSaveSystemAdmin = async () => {
+    if (!systemAdminTarget) {
+      return;
+    }
+
+    setSystemAdminSubmitting(true);
+    try {
+      await api.put(`/org/people/${systemAdminTarget.id}/system-admin`, { isSystemAdmin: systemAdminValue });
+      setPeople((prev) =>
+        prev.map((item) =>
+          item.id === systemAdminTarget.id
+            ? {
+                ...item,
+                isSystemAdmin: systemAdminValue,
+              }
+            : item,
+        ),
+      );
+      message.success('系统管理员设置已更新');
+      logSystemAction(
+        'edit',
+        '系统管理员',
+        systemAdminTarget.name,
+        systemAdminValue ? '已授予系统管理员权限' : '已移除系统管理员权限',
+      );
+      closeSystemAdminModal();
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '系统管理员设置更新失败，请稍后重试');
+      setSystemAdminSubmitting(false);
     }
   };
 
@@ -651,6 +987,7 @@ export default function SystemSettings() {
       }
 
       message.success('人员已移动');
+      logSystemAction('edit', '人员', moveTarget.name, '已调整所属单位、部门和职位');
       closeMoveModal();
     } catch (error: any) {
       message.error(error.response?.data?.message || '人员移动失败，请稍后重试');
@@ -662,7 +999,17 @@ export default function SystemSettings() {
     const onOk = async () => {
       try {
         if (target.type === 'unitNature') {
-          await api.delete(`/org/unit-natures/${target.id}`);
+          if (target.scope === 'org') {
+            await api.delete(`/org/unit-natures/${target.id}/activate`);
+          } else {
+            await api.delete(`/org/unit-natures/${target.id}`);
+          }
+          await loadOrgStructure();
+        } else if (target.type === 'projectType') {
+          await api.delete(`/org/project-types/${target.id}`);
+          await loadOrgStructure();
+        } else if (target.type === 'constructionNature') {
+          await api.delete(`/org/construction-natures/${target.id}`);
           await loadOrgStructure();
         } else if (target.type === 'unit') {
           await api.delete(`/org/units/${target.id}`);
@@ -679,6 +1026,7 @@ export default function SystemSettings() {
         }
 
         message.success(`${orgTypeLabelMap[target.type]}已删除`);
+        logSystemAction('delete', orgTypeLabelMap[target.type], target.name);
       } catch (error: any) {
         message.error(error.response?.data?.message || `${orgTypeLabelMap[target.type]}删除失败，请稍后重试`);
         throw error;
@@ -699,7 +1047,10 @@ export default function SystemSettings() {
     if (target.type === 'unitNature') {
       openActionConfirmDialog({
         actionLabel: '删除单位性质',
-        content: '删除后会同时删除该单位性质下的单位、部门、职位，并清空相关人员的组织信息。是否继续？',
+        content:
+          target.scope === 'org'
+            ? '删除后会从单位管理和权限配置中移除此单位性质，并同时删除该单位性质下的单位、部门、职位，清空相关人员的组织信息。平台配置中的单位性质会保留。是否继续？'
+            : '删除后会同时删除该单位性质下的单位、部门、职位，并清空相关人员的组织信息。是否继续？',
         okText: '确认删除',
         okButtonProps: { danger: true },
         onOk,
@@ -713,12 +1064,6 @@ export default function SystemSettings() {
       onOk,
     });
   };
-
-  const getContextMenuProps = (target: PermissionTarget): { menu: MenuProps; trigger: ['contextMenu'] } =>
-    getContextMenuWithPermissionProps(target);
-
-  const getPersonContextMenuProps = (target: PermissionTarget): { menu: MenuProps; trigger: ['contextMenu'] } =>
-    getPersonContextMenuWithPermissionProps(target);
 
   const getUnitNatureContextMenu = (target: RenameTarget): { menu: MenuProps; trigger: ['contextMenu'] } =>
     getUnitNatureContextMenuProps(target);
@@ -880,6 +1225,16 @@ export default function SystemSettings() {
     setAddUnitNatureModalOpen(true);
   };
 
+  const openAddProjectTypeModal = () => {
+    setAddProjectTypeName('');
+    setAddProjectTypeModalOpen(true);
+  };
+
+  const openAddConstructionNatureModal = () => {
+    setAddConstructionNatureName('');
+    setAddConstructionNatureModalOpen(true);
+  };
+
   const openSelectOrgUnitNatureModal = () => {
     if (unitNatures.length === 0) {
       message.warning('请先在平台配置中添加单位性质');
@@ -947,6 +1302,15 @@ export default function SystemSettings() {
       setSelectOrgUnitNatureIds([]);
       await loadOrgStructure();
       message.success('单位性质已添加');
+      logSystemAction(
+        'add',
+        '单位性质',
+        unitNatures
+          .filter((item) => selectOrgUnitNatureIds.includes(item.id))
+          .map((item) => item.name)
+          .join('、'),
+        '已添加到单位管理和权限配置',
+      );
     } catch (error: any) {
       message.error(error.response?.data?.message || '单位性质添加失败，请稍后重试');
     }
@@ -967,8 +1331,49 @@ export default function SystemSettings() {
       setAddUnitNatureName('');
       setAddUnitNatureModalOpen(false);
       message.success('单位性质已添加');
+      logSystemAction('add', '单位性质', next.name);
     } catch (error: any) {
       message.error(error.response?.data?.message || '单位性质添加失败，请稍后重试');
+    }
+  };
+
+  const handleAddProjectType = async () => {
+    const name = addProjectTypeName.trim();
+    if (!name) {
+      message.error('请输入项目类型名称');
+      return;
+    }
+
+    try {
+      const response = await api.post('/org/project-types', { name });
+      const next = response.data.projectType as ProjectTypeItem;
+      setProjectTypes((prev) => [...prev, next]);
+      setAddProjectTypeName('');
+      setAddProjectTypeModalOpen(false);
+      message.success('项目类型已添加');
+      logSystemAction('add', '项目类型', next.name);
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '项目类型添加失败，请稍后重试');
+    }
+  };
+
+  const handleAddConstructionNature = async () => {
+    const name = addConstructionNatureName.trim();
+    if (!name) {
+      message.error('请输入建设性质名称');
+      return;
+    }
+
+    try {
+      const response = await api.post('/org/construction-natures', { name });
+      const next = response.data.constructionNature as ConstructionNatureItem;
+      setConstructionNatures((prev) => [...prev, next]);
+      setAddConstructionNatureName('');
+      setAddConstructionNatureModalOpen(false);
+      message.success('建设性质已添加');
+      logSystemAction('add', '建设性质', next.name);
+    } catch (error: any) {
+      message.error(error.response?.data?.message || '建设性质添加失败，请稍后重试');
     }
   };
 
@@ -995,6 +1400,7 @@ export default function SystemSettings() {
       setAddUnitName('');
       setAddUnitModalOpen(false);
       message.success('单位已添加');
+      logSystemAction('add', '单位', next.name, `单位性质：${currentUnitNatureName}`);
     } catch (error: any) {
       message.error(error.response?.data?.message || '单位添加失败，请稍后重试');
     }
@@ -1021,6 +1427,7 @@ export default function SystemSettings() {
       setAddDepartmentName('');
       setAddDepartmentModalOpen(false);
       message.success('部门已添加');
+      logSystemAction('add', '部门', next.name, `所属单位：${currentUnitName}`);
     } catch (error: any) {
       message.error(error.response?.data?.message || '部门添加失败，请稍后重试');
     }
@@ -1046,15 +1453,86 @@ export default function SystemSettings() {
       setAddPositionName('');
       setAddPositionModalOpen(false);
       message.success('职位已添加');
+      logSystemAction('add', '职位', next.name, `所属部门：${currentDepartmentName}`);
     } catch (error: any) {
       message.error(error.response?.data?.message || '职位添加失败，请稍后重试');
     }
   };
 
+  const systemLogColumns = [
+    {
+      title: '时间戳',
+      dataIndex: 'createdAt',
+      key: 'createdAt',
+      width: 170,
+      render: (value: string) => formatLogTimestamp(value),
+    },
+    {
+      title: '单位',
+      dataIndex: 'unitName',
+      key: 'unitName',
+      width: 180,
+      render: (value: string | null | undefined) => value || '-',
+    },
+    {
+      title: '部门',
+      dataIndex: 'departmentName',
+      key: 'departmentName',
+      width: 170,
+      render: (value: string | null | undefined) => value || '-',
+    },
+    {
+      title: '职位',
+      dataIndex: 'positionName',
+      key: 'positionName',
+      width: 170,
+      render: (value: string | null | undefined) => value || '-',
+    },
+    {
+      title: '姓名',
+      dataIndex: 'userName',
+      key: 'userName',
+      width: 120,
+      render: (value: string | null | undefined) => value || '-',
+    },
+      {
+        title: '动作',
+        dataIndex: 'actionType',
+        key: 'actionType',
+      width: 90,
+      render: (value: SystemLogItem['actionType']) => (
+        <Tag color={actionTypeColorMap[value]}>{actionTypeLabelMap[value] || value}</Tag>
+      ),
+    },
+    {
+      title: '对象类型',
+      dataIndex: 'targetType',
+      key: 'targetType',
+      width: 120,
+    },
+    {
+      title: '对象名称',
+      dataIndex: 'targetName',
+      key: 'targetName',
+      width: 240,
+      ellipsis: true,
+    },
+    {
+      title: '详情',
+      dataIndex: 'detail',
+      key: 'detail',
+      width: 320,
+      ellipsis: true,
+      render: (value: string | null | undefined) => value || '-',
+    },
+  ];
+
   return (
     <div className="system-settings-page-root">
       <Card className="system-settings-card" bordered={false}>
-        <Tabs
+        <ResettableTabs
+          initialActiveKey="platform"
+          resetToken="system-settings-root"
           activeKey={activeTabKey}
           onChange={(key) => {
             setActiveTabKey(key);
@@ -1094,6 +1572,94 @@ export default function SystemSettings() {
                           key={item.id}
                           {...getUnitNatureContextMenu({
                             type: 'unitNature',
+                            id: item.id,
+                            name: item.name,
+                          })}
+                        >
+                          <div className="system-settings-org-list__item is-readonly">
+                            <div className="system-settings-org-list__title">{item.name}</div>
+                          </div>
+                        </Dropdown>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card
+                  size="small"
+                  title={
+                    <span>
+                      项目类型
+                      <span className="system-settings-org-card__count">{`${projectTypes.length}个`}</span>
+                    </span>
+                  }
+                  className="system-settings-org-card"
+                  extra={
+                    <Tooltip title="新增项目类型">
+                      <Button
+                        type="text"
+                        size="small"
+                        shape="circle"
+                        icon={<PlusOutlined />}
+                        aria-label="新增项目类型"
+                        onClick={openAddProjectTypeModal}
+                      />
+                    </Tooltip>
+                  }
+                >
+                  {projectTypes.length === 0 ? (
+                    <Empty description="暂无项目类型" />
+                  ) : (
+                    <div className="system-settings-org-list">
+                      {projectTypes.map((item) => (
+                        <Dropdown
+                          key={item.id}
+                          {...getUnitNatureContextMenu({
+                            type: 'projectType',
+                            id: item.id,
+                            name: item.name,
+                          })}
+                        >
+                          <div className="system-settings-org-list__item is-readonly">
+                            <div className="system-settings-org-list__title">{item.name}</div>
+                          </div>
+                        </Dropdown>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+
+                <Card
+                  size="small"
+                  title={
+                    <span>
+                      建设性质
+                      <span className="system-settings-org-card__count">{`${constructionNatures.length}个`}</span>
+                    </span>
+                  }
+                  className="system-settings-org-card"
+                  extra={
+                    <Tooltip title="新增建设性质">
+                      <Button
+                        type="text"
+                        size="small"
+                        shape="circle"
+                        icon={<PlusOutlined />}
+                        aria-label="新增建设性质"
+                        onClick={openAddConstructionNatureModal}
+                      />
+                    </Tooltip>
+                  }
+                >
+                  {constructionNatures.length === 0 ? (
+                    <Empty description="暂无建设性质" />
+                  ) : (
+                    <div className="system-settings-org-list">
+                      {constructionNatures.map((item) => (
+                        <Dropdown
+                          key={item.id}
+                          {...getUnitNatureContextMenu({
+                            type: 'constructionNature',
                             id: item.id,
                             name: item.name,
                           })}
@@ -1319,35 +1885,6 @@ export default function SystemSettings() {
                 </Col>
               </Row>
             </Form>
-            <Modal
-              title={permissionTarget ? `${orgTypeLabelMap[permissionTarget.type]}权限` : '权限'}
-              open={Boolean(permissionTarget)}
-              centered
-              okText="保存"
-              cancelText="取消"
-              onOk={() => void handleSavePermission()}
-              onCancel={closePermissionModal}
-              confirmLoading={permissionSubmitting}
-            >
-              <Form layout="vertical">
-                {permissionFieldOptions.map((item) => (
-                  <Form.Item key={item.key} label={item.label}>
-                    <Switch
-                      checked={permissionValues[item.key]}
-                      onChange={(checked) =>
-                        setPermissionValues((prev) => ({
-                          ...prev,
-                          [item.key]: checked,
-                        }))
-                      }
-                    />
-                  </Form.Item>
-                ))}
-                <div style={{ color: 'rgba(0, 0, 0, 0.45)', fontSize: 12 }}>
-                  关闭后，此{permissionTarget ? orgTypeLabelMap[permissionTarget.type] : '对象'}仍可看到页面或菜单，但点击后会提示无权限。
-                </div>
-              </Form>
-            </Modal>
           </TabPane>
 
           <TabPane tab="单位管理和权限配置" key="org">
@@ -1378,9 +1915,8 @@ export default function SystemSettings() {
                   >
                     <div className="system-settings-org-list">
                       {displayedUnitNatures.map((item) => {
-                        return (
+                        const content = (
                           <div
-                            key={item.id}
                             className={`system-settings-org-list__item ${
                               item.id === selectedUnitNatureId ? 'is-active' : ''
                             }`}
@@ -1395,6 +1931,24 @@ export default function SystemSettings() {
                           >
                             <div className="system-settings-org-list__title">{item.name}</div>
                           </div>
+                        );
+
+                        if (item.id === UNASSIGNED_UNIT_NATURE_ID) {
+                          return <div key={item.id}>{content}</div>;
+                        }
+
+                        return (
+                          <Dropdown
+                            key={item.id}
+                            {...getOrgUnitNatureContextMenuProps({
+                              type: 'unitNature',
+                              id: item.id,
+                              name: item.name,
+                              scope: 'org',
+                            })}
+                          >
+                            {content}
+                          </Dropdown>
                         );
                       })}
                     </div>
@@ -1450,11 +2004,10 @@ export default function SystemSettings() {
                           return (
                             <Dropdown
                               key={item.id}
-                              {...getContextMenuProps({
+                              {...getUnitContextMenuProps({
                                 type: 'unit',
                                 id: item.id,
                                 name: item.name,
-                                ...normalizeVisibilitySettings(item),
                               })}
                             >
                               {unitNode}
@@ -1499,11 +2052,10 @@ export default function SystemSettings() {
                         {currentDepartments.map((item) => (
                           <Dropdown
                             key={item.id}
-                            {...getContextMenuProps({
+                            {...getDepartmentContextMenuProps({
                               type: 'department',
                               id: item.id,
                               name: item.name,
-                              ...normalizeVisibilitySettings(item),
                             })}
                           >
                             <div
@@ -1561,11 +2113,10 @@ export default function SystemSettings() {
                         {currentPositions.map((item) => (
                           <Dropdown
                             key={item.id}
-                            {...getContextMenuProps({
+                            {...getPositionContextMenuProps({
                               type: 'position',
                               id: item.id,
                               name: item.name,
-                              ...normalizeVisibilitySettings(item),
                             })}
                           >
                             <div
@@ -1609,15 +2160,17 @@ export default function SystemSettings() {
                           <Dropdown
                             key={item.id}
                             {...getPersonContextMenuProps({
-                              type: 'person',
                               id: item.id,
                               name: item.name,
                               positionId: item.positionId,
-                              ...normalizeVisibilitySettings(item),
+                              isSystemAdmin: item.isSystemAdmin,
                             })}
                           >
                             <div className="system-settings-org-list__item is-readonly">
                               <div className="system-settings-org-list__title">{item.name}</div>
+                              {item.isSystemAdmin ? (
+                                <div className="system-settings-org-list__sub">系统管理员</div>
+                              ) : null}
                             </div>
                           </Dropdown>
                         ))}
@@ -1628,218 +2181,421 @@ export default function SystemSettings() {
               </div>
             </div>
 
-            <Modal
-              title="新增单位"
-              open={addUnitModalOpen}
-              centered
-              okText="保存"
-              cancelText="取消"
-              onOk={handleAddUnit}
-              onCancel={() => setAddUnitModalOpen(false)}
-              okButtonProps={{ disabled: !addUnitName.trim() }}
-            >
-              <Form layout="vertical">
-                <Form.Item label="单位名称" required>
-                  <Input
-                    value={addUnitName}
-                    placeholder="请输入单位名称"
-                    onChange={(event) => setAddUnitName(event.target.value)}
-                    onPressEnter={handleAddUnit}
-                  />
-                </Form.Item>
-              </Form>
-            </Modal>
-
-            <Modal
-              title="新增部门"
-              open={addDepartmentModalOpen}
-              centered
-              okText="保存"
-              cancelText="取消"
-              onOk={handleAddDepartment}
-              onCancel={() => setAddDepartmentModalOpen(false)}
-              okButtonProps={{ disabled: !addDepartmentName.trim() }}
-            >
-              <Form layout="vertical">
-                <div className="system-settings-modal-path">
-                  当前挂载路径：{currentUnitNatureName} / {currentUnitName}
-                </div>
-                <Form.Item label="部门名称" required>
-                  <Input
-                    autoFocus
-                    value={addDepartmentName}
-                    placeholder="请输入部门名称"
-                    onChange={(event) => setAddDepartmentName(event.target.value)}
-                    onPressEnter={handleAddDepartment}
-                  />
-                </Form.Item>
-              </Form>
-            </Modal>
-
-            <Modal
-              title="新增职位"
-              open={addPositionModalOpen}
-              centered
-              okText="保存"
-              cancelText="取消"
-              onOk={handleAddPosition}
-              onCancel={() => setAddPositionModalOpen(false)}
-              okButtonProps={{ disabled: !addPositionName.trim() }}
-            >
-              <Form layout="vertical">
-                <div className="system-settings-modal-path">
-                  当前挂载路径：{currentUnitNatureName} / {currentUnitName} / {currentDepartmentName}
-                </div>
-                <Form.Item label="职位名称" required>
-                  <Input
-                    autoFocus
-                    value={addPositionName}
-                    placeholder="请输入职位名称"
-                    onChange={(event) => setAddPositionName(event.target.value)}
-                    onPressEnter={handleAddPosition}
-                  />
-                </Form.Item>
-              </Form>
-            </Modal>
-
-            <Modal
-              title={moveTarget ? `移动人员：${moveTarget.name}` : '移动人员'}
-              open={Boolean(moveTarget)}
-              centered
-              width="min(1200px, 92vw)"
-              okText="确定"
-              cancelText="取消"
-              onOk={() => void handleMovePerson()}
-              onCancel={closeMoveModal}
-              confirmLoading={moveSubmitting}
-              okButtonProps={{ disabled: !moveUnitId || !moveDepartmentId || !movePositionId }}
-            >
-              <div className="system-settings-move-grid">
-                <div className="system-settings-move-col">
-                  <div className="system-settings-move-col__title">单位</div>
-                  {units.length === 0 ? (
-                    <Empty description="暂无单位" />
-                  ) : (
-                    <div className="system-settings-org-list">
-                      {units.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`system-settings-org-list__item ${
-                            item.id === moveUnitId ? 'is-active' : ''
-                          }`}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            setMoveUnitId(item.id);
-                            setMoveDepartmentId(0);
-                            setMovePositionId(0);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              setMoveUnitId(item.id);
-                              setMoveDepartmentId(0);
-                              setMovePositionId(0);
-                            }
-                          }}
-                        >
-                          <div className="system-settings-org-list__title">{item.name}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="system-settings-move-col">
-                  <div className="system-settings-move-col__title">部门</div>
-                  {moveDepartments.length === 0 ? (
-                    <Empty description="请选择单位" />
-                  ) : (
-                    <div className="system-settings-org-list">
-                      {moveDepartments.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`system-settings-org-list__item ${
-                            item.id === moveDepartmentId ? 'is-active' : ''
-                          }`}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            setMoveDepartmentId(item.id);
-                            setMovePositionId(0);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              setMoveDepartmentId(item.id);
-                              setMovePositionId(0);
-                            }
-                          }}
-                        >
-                          <div className="system-settings-org-list__title">{item.name}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <div className="system-settings-move-col">
-                  <div className="system-settings-move-col__title">职位</div>
-                  {movePositions.length === 0 ? (
-                    <Empty description="请选择部门" />
-                  ) : (
-                    <div className="system-settings-org-list">
-                      {movePositions.map((item) => (
-                        <div
-                          key={item.id}
-                          className={`system-settings-org-list__item ${
-                            item.id === movePositionId ? 'is-active' : ''
-                          }`}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => setMovePositionId(item.id)}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter' || event.key === ' ') {
-                              event.preventDefault();
-                              setMovePositionId(item.id);
-                            }
-                          }}
-                        >
-                          <div className="system-settings-org-list__title">{item.name}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </Modal>
-
-            <Modal
-              title={renameTarget ? `重命名${orgTypeLabelMap[renameTarget.type]}` : '重命名'}
-              open={Boolean(renameTarget)}
-              centered
-              okText="保存"
-              cancelText="取消"
-              onOk={() => void handleRename()}
-              onCancel={closeRenameModal}
-              confirmLoading={renameSubmitting}
-              okButtonProps={{ disabled: !renameValue.trim() }}
-            >
-              <Form layout="vertical">
-                <Form.Item label={renameTarget ? `${orgTypeLabelMap[renameTarget.type]}名称` : '名称'} required>
-                  <Input
-                    autoFocus
-                    value={renameValue}
-                    placeholder={renameTarget ? `请输入${orgTypeLabelMap[renameTarget.type]}名称` : '请输入名称'}
-                    onChange={(event) => setRenameValue(event.target.value)}
-                    onPressEnter={() => void handleRename()}
-                  />
-                </Form.Item>
-              </Form>
-            </Modal>
           </TabPane>
 
-        </Tabs>
+          <TabPane tab="系统日志" key="logs">
+            <div className="system-settings-platform-root">
+              <Card
+                size="small"
+                title={
+                  <span>
+                    系统日志
+                    <span className="system-settings-org-card__count">{`${systemLogs.length}条`}</span>
+                  </span>
+                }
+                className="system-settings-org-card"
+              >
+                <Table<SystemLogItem>
+                  rowKey="id"
+                  loading={systemLogsLoading}
+                  columns={systemLogColumns}
+                  dataSource={systemLogs}
+                  pagination={{ pageSize: 20, showSizeChanger: false }}
+                  scroll={{ x: 1600 }}
+                  locale={{ emptyText: '暂无系统日志' }}
+                />
+              </Card>
+            </div>
+          </TabPane>
+
+        </ResettableTabs>
+        <Modal
+          title={unitProjectTarget ? `项目分配：${unitProjectTarget.name}` : '项目分配'}
+          open={Boolean(unitProjectTarget)}
+          centered
+          width="min(1200px, 92vw)"
+          okText="保存"
+          cancelText="取消"
+          onOk={() => void handleSaveUnitProjectAssignments()}
+          onCancel={closeUnitProjectModal}
+          confirmLoading={unitProjectSubmitting}
+        >
+          {unitProjectLoading ? (
+            <div className="system-settings-selection-loading">加载中...</div>
+          ) : projects.length === 0 ? (
+            <Empty description="暂无项目" />
+          ) : (
+            <>
+              <div className="system-settings-selection-grid">
+                {projects.map((item) => {
+                  const selected = unitProjectIds.includes(item.id);
+                  const meta = [item.projectTypeName, item.constructionNatureName, item.manager]
+                    .filter(Boolean)
+                    .join(' · ');
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`system-settings-selection-card ${selected ? 'is-selected' : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() =>
+                        setUnitProjectIds((prev) =>
+                          prev.includes(item.id) ? prev.filter((projectId) => projectId !== item.id) : [...prev, item.id],
+                        )
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setUnitProjectIds((prev) =>
+                            prev.includes(item.id)
+                              ? prev.filter((projectId) => projectId !== item.id)
+                              : [...prev, item.id],
+                          );
+                        }
+                      }}
+                    >
+                      <div className="system-settings-selection-card__title">{item.name}</div>
+                      <div className="system-settings-selection-card__meta">{meta || '点击选择项目'}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="system-settings-modal-hint">单位只能查看已分配的项目。</div>
+            </>
+          )}
+        </Modal>
+        <Modal
+          title={departmentBusinessTarget ? `业务范围：${departmentBusinessTarget.name}` : '业务范围'}
+          open={Boolean(departmentBusinessTarget)}
+          centered
+          width="min(960px, 92vw)"
+          okText="保存"
+          cancelText="取消"
+          onOk={() => void handleSaveDepartmentBusinessDomains()}
+          onCancel={closeDepartmentBusinessModal}
+          confirmLoading={departmentBusinessSubmitting}
+        >
+          {departmentBusinessLoading ? (
+            <div className="system-settings-selection-loading">加载中...</div>
+          ) : businessDomains.length === 0 ? (
+            <Empty description="暂无业务范围" />
+          ) : (
+            <>
+              <div className="system-settings-selection-grid is-compact">
+                {businessDomains.map((item) => {
+                  const selected = departmentBusinessDomainIds.includes(item.id);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className={`system-settings-selection-card ${selected ? 'is-selected' : ''}`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() =>
+                        setDepartmentBusinessDomainIds((prev) =>
+                          prev.includes(item.id) ? prev.filter((domainId) => domainId !== item.id) : [...prev, item.id],
+                        )
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setDepartmentBusinessDomainIds((prev) =>
+                            prev.includes(item.id)
+                              ? prev.filter((domainId) => domainId !== item.id)
+                              : [...prev, item.id],
+                          );
+                        }
+                      }}
+                    >
+                      <div className="system-settings-selection-card__title">{item.name}</div>
+                      <div className="system-settings-selection-card__meta">{item.code}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="system-settings-modal-hint">部门只负责定义可开展的业务范围。</div>
+            </>
+          )}
+        </Modal>
+        <Modal
+          title={positionBusinessTarget ? `业务权限：${positionBusinessTarget.name}` : '业务权限'}
+          open={Boolean(positionBusinessTarget)}
+          centered
+          width="min(1080px, 92vw)"
+          okText="保存"
+          cancelText="取消"
+          onOk={() => void handleSavePositionBusinessPermissions()}
+          onCancel={closePositionBusinessModal}
+          confirmLoading={positionBusinessSubmitting}
+        >
+          {positionBusinessLoading ? (
+            <div className="system-settings-selection-loading">加载中...</div>
+          ) : positionBusinessPermissions.length === 0 ? (
+            <Empty description="请先在所属部门中配置业务范围" />
+          ) : (
+            <>
+              <div className="system-settings-permission-list">
+                {positionBusinessPermissions.map((item) => (
+                  <div key={item.businessDomainId} className="system-settings-permission-card">
+                    <div className="system-settings-permission-card__header">
+                      <div className="system-settings-permission-card__title">{item.name}</div>
+                      <div className="system-settings-permission-card__meta">{item.code}</div>
+                    </div>
+                    <div className="system-settings-permission-switches">
+                      {[
+                        { key: 'canView', label: '查看' },
+                        { key: 'canCreate', label: '新增' },
+                        { key: 'canEdit', label: '编辑' },
+                        { key: 'canDelete', label: '删除' },
+                        { key: 'canUpload', label: '上传' },
+                      ].map((field) => (
+                        <div key={field.key} className="system-settings-permission-switches__item">
+                          <span>{field.label}</span>
+                          <Switch
+                            checked={item[field.key as keyof PositionBusinessPermissionItem] as boolean}
+                            onChange={(checked) =>
+                              handlePositionPermissionChange(
+                                item.businessDomainId,
+                                field.key as 'canView' | 'canCreate' | 'canEdit' | 'canDelete' | 'canUpload',
+                                checked,
+                              )
+                            }
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="system-settings-modal-hint">职位权限只在所属部门已开放的业务范围内生效。</div>
+            </>
+          )}
+        </Modal>
+        <Modal
+          title={systemAdminTarget ? `系统管理员：${systemAdminTarget.name}` : '系统管理员'}
+          open={Boolean(systemAdminTarget)}
+          centered
+          okText="保存"
+          cancelText="取消"
+          onOk={() => void handleSaveSystemAdmin()}
+          onCancel={closeSystemAdminModal}
+          confirmLoading={systemAdminSubmitting}
+        >
+          <Form layout="vertical">
+            <div className="system-settings-modal-path">
+              系统管理员拥有全部业务权限，以及平台配置、系统配置、系统日志等系统级权限。
+            </div>
+            <Form.Item label="系统管理员">
+              <Switch checked={systemAdminValue} onChange={setSystemAdminValue} />
+            </Form.Item>
+          </Form>
+        </Modal>
+        <Modal
+          title="新增单位"
+          open={addUnitModalOpen}
+          centered
+          okText="保存"
+          cancelText="取消"
+          onOk={handleAddUnit}
+          onCancel={() => setAddUnitModalOpen(false)}
+          okButtonProps={{ disabled: !addUnitName.trim() }}
+        >
+          <Form layout="vertical">
+            <Form.Item label="单位名称" required>
+              <Input
+                value={addUnitName}
+                placeholder="请输入单位名称"
+                onChange={(event) => setAddUnitName(event.target.value)}
+                onPressEnter={handleAddUnit}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
+        <Modal
+          title="新增部门"
+          open={addDepartmentModalOpen}
+          centered
+          okText="保存"
+          cancelText="取消"
+          onOk={handleAddDepartment}
+          onCancel={() => setAddDepartmentModalOpen(false)}
+          okButtonProps={{ disabled: !addDepartmentName.trim() }}
+        >
+          <Form layout="vertical">
+            <div className="system-settings-modal-path">
+              当前挂载路径：{currentUnitNatureName} / {currentUnitName}
+            </div>
+            <Form.Item label="部门名称" required>
+              <Input
+                autoFocus
+                value={addDepartmentName}
+                placeholder="请输入部门名称"
+                onChange={(event) => setAddDepartmentName(event.target.value)}
+                onPressEnter={handleAddDepartment}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
+        <Modal
+          title="新增职位"
+          open={addPositionModalOpen}
+          centered
+          okText="保存"
+          cancelText="取消"
+          onOk={handleAddPosition}
+          onCancel={() => setAddPositionModalOpen(false)}
+          okButtonProps={{ disabled: !addPositionName.trim() }}
+        >
+          <Form layout="vertical">
+            <div className="system-settings-modal-path">
+              当前挂载路径：{currentUnitNatureName} / {currentUnitName} / {currentDepartmentName}
+            </div>
+            <Form.Item label="职位名称" required>
+              <Input
+                autoFocus
+                value={addPositionName}
+                placeholder="请输入职位名称"
+                onChange={(event) => setAddPositionName(event.target.value)}
+                onPressEnter={handleAddPosition}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
+        <Modal
+          title={moveTarget ? `移动人员：${moveTarget.name}` : '移动人员'}
+          open={Boolean(moveTarget)}
+          centered
+          width="min(1200px, 92vw)"
+          okText="确定"
+          cancelText="取消"
+          onOk={() => void handleMovePerson()}
+          onCancel={closeMoveModal}
+          confirmLoading={moveSubmitting}
+          okButtonProps={{ disabled: !moveUnitId || !moveDepartmentId || !movePositionId }}
+        >
+          <div className="system-settings-move-grid">
+            <div className="system-settings-move-col">
+              <div className="system-settings-move-col__title">单位</div>
+              {units.length === 0 ? (
+                <Empty description="暂无单位" />
+              ) : (
+                <div className="system-settings-org-list">
+                  {units.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`system-settings-org-list__item ${
+                        item.id === moveUnitId ? 'is-active' : ''
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        setMoveUnitId(item.id);
+                        setMoveDepartmentId(0);
+                        setMovePositionId(0);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setMoveUnitId(item.id);
+                          setMoveDepartmentId(0);
+                          setMovePositionId(0);
+                        }
+                      }}
+                    >
+                      <div className="system-settings-org-list__title">{item.name}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="system-settings-move-col">
+              <div className="system-settings-move-col__title">部门</div>
+              {moveDepartments.length === 0 ? (
+                <Empty description="请选择单位" />
+              ) : (
+                <div className="system-settings-org-list">
+                  {moveDepartments.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`system-settings-org-list__item ${
+                        item.id === moveDepartmentId ? 'is-active' : ''
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => {
+                        setMoveDepartmentId(item.id);
+                        setMovePositionId(0);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setMoveDepartmentId(item.id);
+                          setMovePositionId(0);
+                        }
+                      }}
+                    >
+                      <div className="system-settings-org-list__title">{item.name}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="system-settings-move-col">
+              <div className="system-settings-move-col__title">职位</div>
+              {movePositions.length === 0 ? (
+                <Empty description="请选择部门" />
+              ) : (
+                <div className="system-settings-org-list">
+                  {movePositions.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`system-settings-org-list__item ${
+                        item.id === movePositionId ? 'is-active' : ''
+                      }`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setMovePositionId(item.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          setMovePositionId(item.id);
+                        }
+                      }}
+                    >
+                      <div className="system-settings-org-list__title">{item.name}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </Modal>
+        <Modal
+          title={renameTarget ? `重命名${orgTypeLabelMap[renameTarget.type]}` : '重命名'}
+          open={Boolean(renameTarget)}
+          centered
+          okText="保存"
+          cancelText="取消"
+          onOk={() => void handleRename()}
+          onCancel={closeRenameModal}
+          confirmLoading={renameSubmitting}
+          okButtonProps={{ disabled: !renameValue.trim() }}
+        >
+          <Form layout="vertical">
+            <Form.Item label={renameTarget ? `${orgTypeLabelMap[renameTarget.type]}名称` : '名称'} required>
+              <Input
+                autoFocus
+                value={renameValue}
+                placeholder={renameTarget ? `请输入${orgTypeLabelMap[renameTarget.type]}名称` : '请输入名称'}
+                onChange={(event) => setRenameValue(event.target.value)}
+                onPressEnter={() => void handleRename()}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
         <Modal
           title="新增单位性质"
           open={addUnitNatureModalOpen}
@@ -1858,6 +2614,50 @@ export default function SystemSettings() {
                 placeholder="请输入单位性质名称"
                 onChange={(event) => setAddUnitNatureName(event.target.value)}
                 onPressEnter={handleAddUnitNature}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
+        <Modal
+          title="新增项目类型"
+          open={addProjectTypeModalOpen}
+          centered
+          okText="保存"
+          cancelText="取消"
+          onOk={handleAddProjectType}
+          onCancel={() => setAddProjectTypeModalOpen(false)}
+          okButtonProps={{ disabled: !addProjectTypeName.trim() }}
+        >
+          <Form layout="vertical">
+            <Form.Item label="项目类型名称" required>
+              <Input
+                autoFocus
+                value={addProjectTypeName}
+                placeholder="请输入项目类型名称"
+                onChange={(event) => setAddProjectTypeName(event.target.value)}
+                onPressEnter={handleAddProjectType}
+              />
+            </Form.Item>
+          </Form>
+        </Modal>
+        <Modal
+          title="新增建设性质"
+          open={addConstructionNatureModalOpen}
+          centered
+          okText="保存"
+          cancelText="取消"
+          onOk={handleAddConstructionNature}
+          onCancel={() => setAddConstructionNatureModalOpen(false)}
+          okButtonProps={{ disabled: !addConstructionNatureName.trim() }}
+        >
+          <Form layout="vertical">
+            <Form.Item label="建设性质名称" required>
+              <Input
+                autoFocus
+                value={addConstructionNatureName}
+                placeholder="请输入建设性质名称"
+                onChange={(event) => setAddConstructionNatureName(event.target.value)}
+                onPressEnter={handleAddConstructionNature}
               />
             </Form.Item>
           </Form>
